@@ -13,6 +13,8 @@ import "C"
 
 import (
 	"fmt"
+	"html/template"
+	"net/http"
 	"os"
 	"reflect"
 	"time"
@@ -40,7 +42,14 @@ var exit chan bool
 var callback = goCwiidCallback // so it's not garbage collected
 var errCallback = goErrCallback
 var start *time.Time
-var runners []time.Duration
+var runners []HumanDuration
+var raceResultsTemplate *template.Template
+
+type HumanDuration time.Duration
+
+func (hd HumanDuration) String() string {
+	return fmt.Sprintf("%#02.0f:%#02.0f:%#02.2f\n", time.Duration(hd).Hours(), time.Duration(hd).Minutes(), time.Duration(hd).Seconds())
+}
 
 //export goCwiidCallback
 func goCwiidCallback(wm unsafe.Pointer, a int, mesg *C.struct_cwiid_btn_mesg, tp unsafe.Pointer) {
@@ -88,14 +97,38 @@ func goErrCallback(wm unsafe.Pointer, char *C.char, ap unsafe.Pointer) {
 	}
 }
 
+func handler(w http.ResponseWriter, r *http.Request) {
+	raceResultsTemplate.Execute(w, runners)
+}
+
 func main() {
+	var err error
+	raceResultsTemplate, err = template.ParseFiles("raceResults.template")
+	if err != nil {
+		fmt.Printf("Error parsing template! - %s\n", err)
+		return
+	}
+	go raceFunc()
+	http.HandleFunc("/", handler)
+	err = http.ListenAndServe(":80", nil)
+	if err != nil {
+		fmt.Printf("Error starting http server! - %s\n", err)
+		err = http.ListenAndServe(":8080", nil)
+		if err != nil {
+			fmt.Printf("Error starting http server! - %s\n", err)
+			return
+		}
+	}
+}
+
+func raceFunc() {
 	buttonStatus = make([]bool, len(buttons))
 	var bdaddr C.bdaddr_t
 	var wm *C.struct_cwiid_wiimote_t
 	buttonChan = make(chan _Ctype_uint16_t, 1)
 	exit = make(chan bool, 1)
 	ticker := time.NewTicker(time.Second)
-	runners = make([]time.Duration, 0, 1024)
+	runners = make([]HumanDuration, 0, 1024)
 	val, err := C.cwiid_set_err(C.getErrCallback())
 	if val != 0 || err != nil {
 		fmt.Printf("Error setting the callback to catch errors - %d - %v", val, err)
@@ -113,7 +146,8 @@ func main() {
 			}
 		}
 		fmt.Println("Press 1&2 on the Wiimote now")
-		wm, err = C.cwiid_open(&bdaddr, 0)
+		wm,
+			err = C.cwiid_open(&bdaddr, 0)
 		if err != nil {
 			fmt.Errorf("cwiid_open: %v\n", err)
 			continue
@@ -153,7 +187,7 @@ func main() {
 						fmt.Printf("Race started @ %s\n", start.Format("3:04:05"))
 						runners = runners[:0]
 					} else {
-						runners = append(runners, time.Now().Sub(*start))
+						runners = append(runners, HumanDuration(time.Now().Sub(*start)))
 						diff := runners[len(runners)-1]
 						fmt.Printf("#%d - %s\n", len(runners), diff)
 					}
@@ -181,8 +215,8 @@ func main() {
 				}
 			case now := <-ticker.C:
 				if start != nil {
-					diff := now.Sub(*start)
-					fmt.Printf("%00f:%00f:%00f\n", diff.Hours(), diff.Minutes(), diff.Seconds())
+					diff := HumanDuration(now.Sub(*start))
+					fmt.Println(diff)
 				}
 				// update the clock
 			}

@@ -1,0 +1,6 @@
+<html><body><table>
+	<tr><th>Overall Place</th><th>Time</th></tr>
+	{{range $index, $result := .}}
+		<tr><td>{{$index}}</td><td>{{$result}}</td></tr>
+	{{end}}
+</table></body></html>

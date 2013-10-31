@@ -1,4 +1,4 @@
-#include "mythgowii.h"
+#include "racerwiigo.h"
 #include "_cgo_export.h"
 
 cwiid_mesg_callback_t* getCwiidCallback() {

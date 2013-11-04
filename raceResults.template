@@ -1,6 +1,45 @@
-<html><body><table>
-	<tr><th>Overall Place</th><th>Time</th></tr>
-	{{range $index, $result := .}}
-		<tr><td>{{$index}}</td><td>{{$result}}</td></tr>
+<html>
+	<head>
+		<meta http-equiv="refresh" content="30">
+	{{if .Start}}
+		<script type="text/javascript">
+			var seconds = {{.Seconds}};
+			function FormatNumberLength(num, length) {
+				var r = "" + num;
+				while (r.length < length) {
+					r = "0" + r;
+				}
+				return r;
+			}
+			function updateTime() {
+				document.getElementById("time").innerHTML = FormatNumberLength(Math.floor(seconds/60/60),2) + ":" + FormatNumberLength(Math.floor((seconds/60)%60),2) + ":" + FormatNumberLength((seconds%60),2);
+				seconds++;
+			}
+			function start() {
+				setTimeout(function() {
+					updateTime();
+					setInterval(updateTime,1000);
+				},{{.NextUpdate}});
+			}
+			window.onload = start;
+		</script>
 	{{end}}
-</table></body></html>
+	</head>
+	<body>
+		{{if .Start}}
+			<h1 id="time">{{.Time}}</h1>
+			<h2>Race started at {{.Start}}</h2>
+		{{else}}
+			<h1>Not Started</h1>
+		{{end}}
+		<h3>Race status will auto-refresh every 30 seconds</h3>
+		<table>
+			<tr><th>Overall Place</th><th>Time</th></tr>
+			{{range $index, $result := .Racers}}
+				{{if $index}}
+					<tr><td>{{$index}}</td><td>{{$result}}</td></tr>
+				{{end}}
+			{{end}}
+		</table>
+	</body>
+</html>

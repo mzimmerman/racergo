@@ -48,7 +48,13 @@ var raceResultsTemplate *template.Template
 type HumanDuration time.Duration
 
 func (hd HumanDuration) String() string {
-	return fmt.Sprintf("%#02.0f:%#02.0f:%#02.2f\n", time.Duration(hd).Hours(), time.Duration(hd).Minutes(), time.Duration(hd).Seconds())
+	seconds := time.Duration(hd).Seconds()
+	seconds -= float64(time.Duration(hd) / time.Minute * 60)
+	return fmt.Sprintf("%#02d:%#02d:%05.2f", time.Duration(hd)/time.Hour, time.Duration(hd)/time.Minute%60, seconds)
+}
+
+func (hd HumanDuration) Clock() string {
+	return fmt.Sprintf("%#02d:%#02d:%02d", time.Duration(hd)/time.Hour, time.Duration(hd)/time.Minute%60, time.Duration(hd)/time.Second%60)
 }
 
 //export goCwiidCallback
@@ -98,7 +104,16 @@ func goErrCallback(wm unsafe.Pointer, char *C.char, ap unsafe.Pointer) {
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	raceResultsTemplate.Execute(w, runners)
+	data := map[string]interface{}{"Racers": runners}
+	if start != nil {
+		diff := time.Since(*start)
+		data["Start"] = start.Format("3:04:05")
+		data["Time"] = HumanDuration(diff).Clock()
+		data["Seconds"] = fmt.Sprintf("%.0f", diff.Seconds())
+		data["NextUpdate"] = diff / time.Millisecond % 1000
+	}
+	raceResultsTemplate, _ = template.ParseFiles("raceResults.template")
+	raceResultsTemplate.Execute(w, data)
 }
 
 func main() {
@@ -186,10 +201,11 @@ func raceFunc() {
 						*start = time.Now()
 						fmt.Printf("Race started @ %s\n", start.Format("3:04:05"))
 						runners = runners[:0]
+						runners = append(runners, HumanDuration(0))
 					} else {
+						place := len(runners)
 						runners = append(runners, HumanDuration(time.Now().Sub(*start)))
-						diff := runners[len(runners)-1]
-						fmt.Printf("#%d - %s\n", len(runners), diff)
+						fmt.Printf("#%d - %s\n", place, runners[place])
 					}
 				//case C.CWIID_BTN_B:
 				//	fmt.Println("B")

@@ -17,6 +17,8 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"strconv"
+	"strings"
 	"time"
 	"unsafe"
 )
@@ -42,10 +44,20 @@ var exit chan bool
 var callback = goCwiidCallback // so it's not garbage collected
 var errCallback = goErrCallback
 var start *time.Time
-var runners []HumanDuration
+var runners []Result
 var raceResultsTemplate *template.Template
 
 type HumanDuration time.Duration
+
+type Result struct {
+	Fname string
+	Lname string
+	Male  bool
+	Age   uint
+	Time  HumanDuration
+	Place uint
+	Bib   *int
+}
 
 func (hd HumanDuration) String() string {
 	seconds := time.Duration(hd).Seconds()
@@ -103,6 +115,23 @@ func goErrCallback(wm unsafe.Pointer, char *C.char, ap unsafe.Pointer) {
 	}
 }
 
+func bibHandler(w http.ResponseWriter, r *http.Request) {
+	next, err := strconv.Atoi(r.FormValue("next"))
+	if err != nil || next > len(runners) {
+		fmt.Fprintf(w, "Error %s setting bib for place %d", err, next)
+		return
+	}
+	bib, err := strconv.Atoi(r.FormValue("bib"))
+	if err == nil {
+		fmt.Printf("Set bib for place %d to %d", next, bib)
+		runners[next-1].Bib = &bib
+	} else {
+		fmt.Printf("Error %s setting bib for place %d to %d", err, next, bib)
+	}
+	http.Redirect(w, r, "/admin", 301)
+	return
+}
+
 func handler(w http.ResponseWriter, r *http.Request) {
 	data := map[string]interface{}{"Racers": runners}
 	if start != nil {
@@ -111,9 +140,25 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		data["Time"] = HumanDuration(diff).Clock()
 		data["Seconds"] = fmt.Sprintf("%.0f", diff.Seconds())
 		data["NextUpdate"] = diff / time.Millisecond % 1000
+		if strings.HasSuffix(r.RequestURI, "admin") {
+			data["Admin"] = true
+			for x := range runners {
+				if runners[x].Bib == nil {
+					data["Next"] = runners[x].Place
+					break
+				}
+			}
+		}
 	}
-	raceResultsTemplate, _ = template.ParseFiles("raceResults.template")
-	raceResultsTemplate.Execute(w, data)
+	raceResultsTemplate, err := template.ParseFiles("raceResults.template")
+	if err != nil {
+		fmt.Fprintf(w, "Error parsing template - %s", err)
+	} else {
+		err = raceResultsTemplate.Execute(w, data)
+		if err != nil {
+			fmt.Fprintf(w, "Error executing template - %s", err)
+		}
+	}
 }
 
 func main() {
@@ -125,6 +170,8 @@ func main() {
 	}
 	go raceFunc()
 	http.HandleFunc("/", handler)
+	http.HandleFunc("/bib", bibHandler)
+	http.HandleFunc("/admin", handler)
 	err = http.ListenAndServe(":80", nil)
 	if err != nil {
 		fmt.Printf("Error starting http server! - %s\n", err)
@@ -143,7 +190,7 @@ func raceFunc() {
 	buttonChan = make(chan _Ctype_uint16_t, 1)
 	exit = make(chan bool, 1)
 	ticker := time.NewTicker(time.Second)
-	runners = make([]HumanDuration, 0, 1024)
+	runners = make([]Result, 0, 1024)
 	val, err := C.cwiid_set_err(C.getErrCallback())
 	if val != 0 || err != nil {
 		fmt.Printf("Error setting the callback to catch errors - %d - %v", val, err)
@@ -201,11 +248,10 @@ func raceFunc() {
 						*start = time.Now()
 						fmt.Printf("Race started @ %s\n", start.Format("3:04:05"))
 						runners = runners[:0]
-						runners = append(runners, HumanDuration(0))
 					} else {
 						place := len(runners)
-						runners = append(runners, HumanDuration(time.Now().Sub(*start)))
-						fmt.Printf("#%d - %s\n", place, runners[place])
+						runners = append(runners, Result{Place: uint(place + 1), Time: HumanDuration(time.Now().Sub(*start))})
+						fmt.Printf("#%d - %s\n", runners[place].Place, runners[place].Time)
 					}
 				//case C.CWIID_BTN_B:
 				//	fmt.Println("B")

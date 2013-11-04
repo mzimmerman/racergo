@@ -44,19 +44,25 @@ var exit chan bool
 var callback = goCwiidCallback // so it's not garbage collected
 var errCallback = goErrCallback
 var start *time.Time
-var runners []Result
+var entries map[uint]*Entry // map of Bib #s
+var results []*Result
 var raceResultsTemplate *template.Template
 
 type HumanDuration time.Duration
 
+type Entry struct {
+	Bib    int
+	Fname  string
+	Lname  string
+	Gender string
+	Age    uint
+	Result *Result
+}
+
 type Result struct {
-	Fname string
-	Lname string
-	Male  bool
-	Age   uint
 	Time  HumanDuration
 	Place uint
-	Bib   *int
+	Entry *Entry
 }
 
 func (hd HumanDuration) String() string {
@@ -115,16 +121,34 @@ func goErrCallback(wm unsafe.Pointer, char *C.char, ap unsafe.Pointer) {
 	}
 }
 
-func bibHandler(w http.ResponseWriter, r *http.Request) {
-	next, err := strconv.Atoi(r.FormValue("next"))
-	if err != nil || next > len(runners) {
-		fmt.Fprintf(w, "Error %s setting bib for place %d", err, next)
+func uploadCSV(w http.ResponseWriter, r *http.Request) {
+	err := r.ParseForm()
+	if err != nil {
+		fmt.Fprintf(w, "Error parsing form - %s", err)
 		return
 	}
-	bib, err := strconv.Atoi(r.FormValue("bib"))
+
+	http.Redirect(w, r, "/admin", 301)
+	return
+}
+
+func bibHandler(w http.ResponseWriter, r *http.Request) {
+	next, err := strconv.Atoi(r.FormValue("next"))
+	if err != nil || next > len(results) {
+		fmt.Fprintf(w, "Error %s getting next", err)
+		return
+	}
+	tempBib, err := strconv.Atoi(r.FormValue("bib"))
+	bib := uint(tempBib)
 	if err == nil {
-		fmt.Printf("Set bib for place %d to %d", next, bib)
-		runners[next-1].Bib = &bib
+		if _, ok := entries[bib]; ok {
+			results[next-1].Entry = entries[bib]
+			entries[bib].Result = results[next-1]
+			fmt.Printf("Set bib for place %d to %d", next, bib)
+		} else {
+			fmt.Fprintf(w, "Bib number %d was not assigned to anyone.", bib)
+			return
+		}
 	} else {
 		fmt.Printf("Error %s setting bib for place %d to %d", err, next, bib)
 	}
@@ -133,7 +157,7 @@ func bibHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	data := map[string]interface{}{"Racers": runners}
+	data := map[string]interface{}{"Racers": results}
 	if start != nil {
 		diff := time.Since(*start)
 		data["Start"] = start.Format("3:04:05")
@@ -142,9 +166,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		data["NextUpdate"] = diff / time.Millisecond % 1000
 		if strings.HasSuffix(r.RequestURI, "admin") {
 			data["Admin"] = true
-			for x := range runners {
-				if runners[x].Bib == nil {
-					data["Next"] = runners[x].Place
+			for x := range results {
+				if results[x].Entry == nil {
+					data["Next"] = results[x].Place
 					break
 				}
 			}
@@ -190,7 +214,7 @@ func raceFunc() {
 	buttonChan = make(chan _Ctype_uint16_t, 1)
 	exit = make(chan bool, 1)
 	ticker := time.NewTicker(time.Second)
-	runners = make([]Result, 0, 1024)
+	results = make([]*Result, 0, 1024)
 	val, err := C.cwiid_set_err(C.getErrCallback())
 	if val != 0 || err != nil {
 		fmt.Printf("Error setting the callback to catch errors - %d - %v", val, err)
@@ -247,11 +271,11 @@ func raceFunc() {
 						start = new(time.Time)
 						*start = time.Now()
 						fmt.Printf("Race started @ %s\n", start.Format("3:04:05"))
-						runners = runners[:0]
+						results = results[:0]
 					} else {
-						place := len(runners)
-						runners = append(runners, Result{Place: uint(place + 1), Time: HumanDuration(time.Now().Sub(*start))})
-						fmt.Printf("#%d - %s\n", runners[place].Place, runners[place].Time)
+						place := len(results)
+						results = append(results, &Result{Place: uint(place + 1), Time: HumanDuration(time.Now().Sub(*start))})
+						fmt.Printf("#%d - %s\n", results[place].Place, results[place].Time)
 					}
 				//case C.CWIID_BTN_B:
 				//	fmt.Println("B")

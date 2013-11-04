@@ -63,9 +63,9 @@
 				<tr>
 					<td>{{.Place}}</td>
 					<td>{{.Time}}</td>
-					<td>{{with .Bib}}{{.}}{{end}}</td>
-					<td>{{.Fname}}</td>
-					<td>{{.Lname}}</td>
+					<td>{{with .Entry}}{{.Bib}}{{end}}</td>
+					<td>{{with .Entry}}{{.Fname}}{{end}}</td>
+					<td>{{with .Entry}}{{.Lname}}{{end}}</td>
 				</tr>
 			{{end}}
 		</table>

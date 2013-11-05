@@ -12,6 +12,7 @@ package main
 import "C"
 
 import (
+	"encoding/csv"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -47,14 +48,15 @@ var start *time.Time
 var entries map[uint]*Entry // map of Bib #s
 var results []*Result
 var raceResultsTemplate *template.Template
+var useWiimote = false
 
 type HumanDuration time.Duration
 
 type Entry struct {
-	Bib    int
+	Bib    uint
 	Fname  string
 	Lname  string
-	Gender string
+	Male   bool
 	Age    uint
 	Result *Result
 }
@@ -121,13 +123,60 @@ func goErrCallback(wm unsafe.Pointer, char *C.char, ap unsafe.Pointer) {
 	}
 }
 
-func uploadCSV(w http.ResponseWriter, r *http.Request) {
-	err := r.ParseForm()
+func uploadRacers(w http.ResponseWriter, r *http.Request) {
+	reader, err := r.MultipartReader()
 	if err != nil {
-		fmt.Fprintf(w, "Error parsing form - %s", err)
+		fmt.Fprintf(w, "Error getting Reader - %s", err)
 		return
 	}
-
+	part, err := reader.NextPart()
+	if err != nil {
+		fmt.Fprintf(w, "Error getting Part - %s", err)
+		return
+	}
+	csvIn := csv.NewReader(part)
+	rawEntries, err := csvIn.ReadAll()
+	if err != nil {
+		fmt.Fprintf(w, "Error Reading CSV file - %s", err)
+		return
+	}
+	if len(rawEntries) <= 1 {
+		fmt.Fprintf(w, "Either blank file or only supplied the header row")
+		return
+	}
+	// make the map and unlink all previous relationships (if any)
+	entries = make(map[uint]*Entry)
+	for _, result := range results {
+		result.Entry = nil
+	}
+	for row := 1; row < len(rawEntries); row++ {
+		entry := new(Entry)
+		for col := range rawEntries[row] {
+			switch rawEntries[0][col] {
+			case "Fname":
+				entry.Fname = rawEntries[row][col]
+			case "Lname":
+				entry.Lname = rawEntries[row][col]
+			case "Age":
+				tmpAge, _ := strconv.Atoi(rawEntries[row][col])
+				entry.Age = uint(tmpAge)
+			case "Gender":
+				entry.Male = (rawEntries[row][col] == "M")
+			case "Bib":
+				tmpBib, _ := strconv.Atoi(rawEntries[row][col])
+				entry.Bib = uint(tmpBib)
+			default:
+				fmt.Printf("Field %s not imported, dropping\n", rawEntries[0][col])
+			}
+		}
+		fmt.Printf("Read entry - %v", entry)
+		fmt.Printf("CSV Input = %v", rawEntries[row])
+		if entry.Bib != 0 {
+			entries[entry.Bib] = entry
+		} else {
+			fmt.Printf("Skipping due to no bib assigned - %v", entry)
+		}
+	}
 	http.Redirect(w, r, "/admin", 301)
 	return
 }
@@ -139,6 +188,10 @@ func bibHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tempBib, err := strconv.Atoi(r.FormValue("bib"))
+	if tempBib < 0 {
+		fmt.Fprintf(w, "Cannot assign a negative bib number of %d", tempBib)
+		return
+	}
 	bib := uint(tempBib)
 	if err == nil {
 		if _, ok := entries[bib]; ok {
@@ -194,8 +247,9 @@ func main() {
 	}
 	go raceFunc()
 	http.HandleFunc("/", handler)
-	http.HandleFunc("/bib", bibHandler)
 	http.HandleFunc("/admin", handler)
+	http.HandleFunc("/bib", bibHandler)
+	http.HandleFunc("/uploadRacers", uploadRacers)
 	err = http.ListenAndServe(":80", nil)
 	if err != nil {
 		fmt.Printf("Error starting http server! - %s\n", err)
@@ -215,10 +269,13 @@ func raceFunc() {
 	exit = make(chan bool, 1)
 	ticker := time.NewTicker(time.Second)
 	results = make([]*Result, 0, 1024)
-	val, err := C.cwiid_set_err(C.getErrCallback())
-	if val != 0 || err != nil {
-		fmt.Printf("Error setting the callback to catch errors - %d - %v", val, err)
-		os.Exit(1)
+	var err error
+	if useWiimote {
+		val, err := C.cwiid_set_err(C.getErrCallback())
+		if val != 0 || err != nil {
+			fmt.Printf("Error setting the callback to catch errors - %d - %v", val, err)
+			os.Exit(1)
+		}
 	}
 	for {
 	outer:
@@ -232,31 +289,44 @@ func raceFunc() {
 			}
 		}
 		fmt.Println("Press 1&2 on the Wiimote now")
-		wm,
-			err = C.cwiid_open(&bdaddr, 0)
-		if err != nil {
-			fmt.Errorf("cwiid_open: %v\n", err)
-			continue
-		}
+		if useWiimote {
+			wm, err = C.cwiid_open(&bdaddr, 0)
+			if err != nil {
+				fmt.Errorf("cwiid_open: %v\n", err)
+				continue
+			}
 
-		res, err := C.cwiid_command(wm, C.CWIID_CMD_RPT_MODE, C.CWIID_RPT_BTN)
-		if res != 0 || err != nil {
-			fmt.Printf("Result of command = %d - %v\n", res, err)
-		}
+			res, err := C.cwiid_command(wm, C.CWIID_CMD_RPT_MODE, C.CWIID_RPT_BTN)
+			if res != 0 || err != nil {
+				fmt.Printf("Result of command = %d - %v\n", res, err)
+			}
 
-		res, err = C.cwiid_set_mesg_callback(wm, C.getCwiidCallback())
-		if res != 0 || err != nil {
-			fmt.Printf("Result of callback = %d - %v\n", res, err)
-		}
-		res, err = C.cwiid_enable(wm, C.CWIID_FLAG_MESG_IFC)
-		if res != 0 || err != nil {
-			fmt.Printf("Result of enable = %d - %v\n", res, err)
-		}
+			res, err = C.cwiid_set_mesg_callback(wm, C.getCwiidCallback())
+			if res != 0 || err != nil {
+				fmt.Printf("Result of callback = %d - %v\n", res, err)
+			}
+			res, err = C.cwiid_enable(wm, C.CWIID_FLAG_MESG_IFC)
+			if res != 0 || err != nil {
+				fmt.Printf("Result of enable = %d - %v\n", res, err)
+			}
 
-		res, err = C.cwiid_set_led(wm, C.CWIID_LED4_ON)
-		if res != 0 || err != nil {
-			fmt.Printf("Set led result = %d\n", res)
-			fmt.Errorf("Err = %v", err)
+			res, err = C.cwiid_set_led(wm, C.CWIID_LED4_ON)
+			if res != 0 || err != nil {
+				fmt.Printf("Set led result = %d\n", res)
+				fmt.Errorf("Err = %v", err)
+			}
+		} else { // simulate the pressing of the wiimote A button for testing
+			go func() {
+				simulButton := time.NewTicker(time.Second * 10)
+				//buttonChan <- C.CWIID_BTN_A // start race immediately
+				//buttonChan <- C.CWIID_BTN_A // first runner! :)
+				for {
+					select {
+					case <-simulButton.C:
+						buttonChan <- C.CWIID_BTN_A
+					}
+				}
+			}()
 		}
 	loop:
 		for {

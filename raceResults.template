@@ -29,15 +29,20 @@
 	</head>
 	<body>
 		{{if .Admin}}
-			<form action="bib" method="post">
-				{{if .Next}}
+			{{if .Next}}
+				<form action="bib" method="post">
 					<label for="bib">Set Bib for Overall Place #{{.Next}}</label>
-					<input type="number" name="bib" id="bib" autofocus>
+					<input type="number" name="bib" id="bib" required="required" autofocus>
 					<input type="hidden" name="next" value="{{.Next}}">
 					<button type="submit">Submit</button>
-				{{else}}
-					<label for="bib">Waiting for next finisher</label>
-				{{end}}
+				</form>
+			{{else}}
+				<h1>All bib #'s entered for results, waiting for next finisher</h1>
+			{{end}}
+			<form action="uploadRacers" method="post" enctype="multipart/form-data">
+				<label for="entriesUpload">Upload Registrants CSV</label>
+				<input title="CSV file should have a header row containing at least Fname, Lname, Gender (M/F), and Age" type="file" id="entriesUpload" name="entries" accept="text/csv" required="required">
+				<button type="submit">Upload</button>
 			</form>
 		{{end}}
 		{{if .Start}}

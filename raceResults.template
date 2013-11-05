@@ -44,6 +44,7 @@
 				<input title="CSV file should have a header row containing at least Fname, Lname, Gender (M/F), and Age" type="file" id="entriesUpload" name="entries" accept="text/csv" required="required">
 				<button type="submit">Upload</button>
 			</form>
+			<a href="/download">Download</a>
 		{{end}}
 		{{if .Start}}
 			<h1 id="time">{{.Time}}</h1>

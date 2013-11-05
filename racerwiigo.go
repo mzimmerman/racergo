@@ -53,6 +53,7 @@ var useWiimote = false
 type HumanDuration time.Duration
 
 type Entry struct {
+	Id     uint
 	Bib    uint
 	Fname  string
 	Lname  string
@@ -123,6 +124,34 @@ func goErrCallback(wm unsafe.Pointer, char *C.char, ap unsafe.Pointer) {
 	}
 }
 
+func download(w http.ResponseWriter, r *http.Request) {
+	filename := fmt.Sprintf("raceresults-%s.csv", time.Now().In(time.Local).Format("2006-01-02"))
+	w.Header().Set("Content-type", "application/csv")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+	length := len(entries)
+	if length > len(results) {
+		length = len(results)
+	}
+	csvData := make([][]string, 0, length+1)
+	csvData = append(csvData, []string{"Fname", "Lname", "Age", "Bib", "Overall Place", "Time"})
+	for _, result := range results {
+		if result.Entry == nil {
+			csvData = append(csvData, []string{"", "", "", "", strconv.Itoa(int(result.Place)), result.Time.String()})
+		} else {
+			csvData = append(csvData, []string{result.Entry.Fname, result.Entry.Lname, strconv.Itoa(int(result.Entry.Age)), strconv.Itoa(int(result.Entry.Bib)), strconv.Itoa(int(result.Place)), result.Time.String()})
+		}
+	}
+	for _, entry := range entries {
+		if entry.Result == nil {
+			// did not account for this one above
+			csvData = append(csvData, []string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), "", "", ""})
+		}
+	}
+	writer := csv.NewWriter(w)
+	writer.WriteAll(csvData)
+	writer.Flush()
+}
+
 func uploadRacers(w http.ResponseWriter, r *http.Request) {
 	reader, err := r.MultipartReader()
 	if err != nil {
@@ -150,7 +179,7 @@ func uploadRacers(w http.ResponseWriter, r *http.Request) {
 		result.Entry = nil
 	}
 	for row := 1; row < len(rawEntries); row++ {
-		entry := new(Entry)
+		entry := &Entry{Id: uint(row)}
 		for col := range rawEntries[row] {
 			switch rawEntries[0][col] {
 			case "Fname":
@@ -249,6 +278,7 @@ func main() {
 	http.HandleFunc("raceresults/", handler)
 	http.HandleFunc("raceresults/admin", handler)
 	http.HandleFunc("raceresults/bib", bibHandler)
+	http.HandleFunc("raceresults/download", download)
 	http.HandleFunc("raceresults/uploadRacers", uploadRacers)
 	http.Handle("/", http.RedirectHandler("http://raceresults/", 307))
 	err = http.ListenAndServe(":80", nil)

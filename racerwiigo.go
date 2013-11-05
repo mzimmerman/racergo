@@ -45,20 +45,25 @@ var exit chan bool
 var callback = goCwiidCallback // so it's not garbage collected
 var errCallback = goErrCallback
 var start *time.Time
-var entries map[uint]*Entry // map of Bib #s
+var bibbedEntries map[int]*Entry   // map of Bib #s
+var unbibbedEntries map[int]*Entry // map of sequential Ids
 var results []*Result
 var raceResultsTemplate *template.Template
+var errorTemplate *template.Template
 var useWiimote = false
 
 type HumanDuration time.Duration
 
 type Entry struct {
-	Id     uint
-	Bib    uint
+	Bib    int
 	Fname  string
 	Lname  string
 	Male   bool
 	Age    uint
+	Email  string
+	Phone  string
+	Date   string
+	TShirt string
 	Result *Result
 }
 
@@ -128,7 +133,7 @@ func download(w http.ResponseWriter, r *http.Request) {
 	filename := fmt.Sprintf("raceresults-%s.csv", time.Now().In(time.Local).Format("2006-01-02"))
 	w.Header().Set("Content-type", "application/csv")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
-	length := len(entries)
+	length := len(unbibbedEntries)
 	if length > len(results) {
 		length = len(results)
 	}
@@ -141,11 +146,8 @@ func download(w http.ResponseWriter, r *http.Request) {
 			csvData = append(csvData, []string{result.Entry.Fname, result.Entry.Lname, strconv.Itoa(int(result.Entry.Age)), strconv.Itoa(int(result.Entry.Bib)), strconv.Itoa(int(result.Place)), result.Time.String()})
 		}
 	}
-	for _, entry := range entries {
-		if entry.Result == nil {
-			// did not account for this one above
-			csvData = append(csvData, []string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), "", "", ""})
-		}
+	for _, entry := range unbibbedEntries {
+		csvData = append(csvData, []string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), "", "", ""})
 	}
 	writer := csv.NewWriter(w)
 	writer.WriteAll(csvData)
@@ -155,31 +157,32 @@ func download(w http.ResponseWriter, r *http.Request) {
 func uploadRacers(w http.ResponseWriter, r *http.Request) {
 	reader, err := r.MultipartReader()
 	if err != nil {
-		fmt.Fprintf(w, "Error getting Reader - %s", err)
+		showErrorForAdmin(w, "Error getting Reader - %s", err)
 		return
 	}
 	part, err := reader.NextPart()
 	if err != nil {
-		fmt.Fprintf(w, "Error getting Part - %s", err)
+		showErrorForAdmin(w, "Error getting Part - %s", err)
 		return
 	}
 	csvIn := csv.NewReader(part)
 	rawEntries, err := csvIn.ReadAll()
 	if err != nil {
-		fmt.Fprintf(w, "Error Reading CSV file - %s", err)
+		showErrorForAdmin(w, "Error Reading CSV file - %s", err)
 		return
 	}
 	if len(rawEntries) <= 1 {
-		fmt.Fprintf(w, "Either blank file or only supplied the header row")
+		showErrorForAdmin(w, "Either blank file or only supplied the header row")
 		return
 	}
-	// make the map and unlink all previous relationships (if any)
-	entries = make(map[uint]*Entry)
+	// make the maps and unlink all previous relationships (if any)
+	bibbedEntries = make(map[int]*Entry)
+	unbibbedEntries = make(map[int]*Entry)
 	for _, result := range results {
 		result.Entry = nil
 	}
 	for row := 1; row < len(rawEntries); row++ {
-		entry := &Entry{Id: uint(row)}
+		entry := &Entry{Bib: -1}
 		for col := range rawEntries[row] {
 			switch rawEntries[0][col] {
 			case "Fname":
@@ -192,47 +195,95 @@ func uploadRacers(w http.ResponseWriter, r *http.Request) {
 			case "Gender":
 				entry.Male = (rawEntries[row][col] == "M")
 			case "Bib":
-				tmpBib, _ := strconv.Atoi(rawEntries[row][col])
-				entry.Bib = uint(tmpBib)
+				entry.Bib, _ = strconv.Atoi(rawEntries[row][col])
+			case "Email":
+				entry.Email = rawEntries[row][col]
+			case "Phone":
+				entry.Phone = rawEntries[row][col]
+			case "Date":
+				entry.Date = rawEntries[row][col]
+			case "TShirt":
+				entry.TShirt = rawEntries[row][col]
 			default:
 				fmt.Printf("Field %s not imported, dropping\n", rawEntries[0][col])
 			}
 		}
-		fmt.Printf("Read entry - %v", entry)
-		fmt.Printf("CSV Input = %v", rawEntries[row])
-		if entry.Bib != 0 {
-			entries[entry.Bib] = entry
+		if entry.Bib == -1 {
+			unbibbedEntries[row] = entry
 		} else {
-			fmt.Printf("Skipping due to no bib assigned - %v", entry)
+			bibbedEntries[entry.Bib] = entry
 		}
 	}
 	http.Redirect(w, r, "/admin", 301)
 	return
 }
 
-func bibHandler(w http.ResponseWriter, r *http.Request) {
+func linkBib(w http.ResponseWriter, r *http.Request) {
 	next, err := strconv.Atoi(r.FormValue("next"))
 	if err != nil || next > len(results) {
-		fmt.Fprintf(w, "Error %s getting next", err)
+		showErrorForAdmin(w, "Error %s getting next", err)
 		return
 	}
-	tempBib, err := strconv.Atoi(r.FormValue("bib"))
-	if tempBib < 0 {
-		fmt.Fprintf(w, "Cannot assign a negative bib number of %d", tempBib)
+	bib, err := strconv.Atoi(r.FormValue("bib"))
+	if bib < 0 {
+		showErrorForAdmin(w, "Cannot assign a negative bib number of %d", bib)
 		return
 	}
-	bib := uint(tempBib)
 	if err == nil {
-		if _, ok := entries[bib]; ok {
-			results[next-1].Entry = entries[bib]
-			entries[bib].Result = results[next-1]
+		if _, ok := bibbedEntries[bib]; ok {
+			if bibbedEntries[bib].Result != nil {
+				showErrorForAdmin(w, "Bib number %d already crossed the finish line in place #%d", bib, bibbedEntries[bib].Result.Place)
+				return
+			}
+			results[next-1].Entry = bibbedEntries[bib]
+			bibbedEntries[bib].Result = results[next-1]
 			fmt.Printf("Set bib for place %d to %d", next, bib)
 		} else {
-			fmt.Fprintf(w, "Bib number %d was not assigned to anyone.", bib)
+			showErrorForAdmin(w, "Bib number %d was not assigned to anyone.", bib)
 			return
 		}
 	} else {
-		fmt.Printf("Error %s setting bib for place %d to %d", err, next, bib)
+		showErrorForAdmin(w, "Error %s setting bib for place %d to %d", err, next, bib)
+		return
+	}
+	http.Redirect(w, r, "/admin", 301)
+	return
+}
+
+func showErrorForAdmin(w http.ResponseWriter, message string, args ...interface{}) {
+	err := errorTemplate.Execute(w, fmt.Sprintf(message, args...))
+	if err != nil {
+		fmt.Fprintf(w, "Error executing template - %s", err)
+	}
+}
+
+func assignBib(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.FormValue("id"))
+	if err != nil {
+		showErrorForAdmin(w, "Error %s getting next", err)
+		return
+	}
+	bib, err := strconv.Atoi(r.FormValue("bib"))
+	if bib < 0 {
+		showErrorForAdmin(w, "Cannot assign a negative bib number of %d", bib)
+		return
+	}
+	if err == nil {
+		if entry, ok := unbibbedEntries[id]; ok {
+			if _, ok = bibbedEntries[bib]; ok {
+				showErrorForAdmin(w, "Bib # %d already assigned!", bib)
+				return
+			}
+			entry.Bib = bib
+			fmt.Printf("Set bib for %s %s to %d", entry.Fname, entry.Lname, bib)
+			delete(unbibbedEntries, id)
+			bibbedEntries[entry.Bib] = entry
+		} else {
+			showErrorForAdmin(w, "Id %d was not assigned to anyone.", id)
+			return
+		}
+	} else {
+		fmt.Printf("Error %s assigning bib for id %d to %d", err, id, bib)
 	}
 	http.Redirect(w, r, "/admin", 301)
 	return
@@ -254,8 +305,12 @@ func handler(w http.ResponseWriter, r *http.Request) {
 					break
 				}
 			}
+			if len(unbibbedEntries) > 0 {
+				data["Unbibbed"] = unbibbedEntries
+			}
 		}
 	}
+	// TODO: take this code out once we're not changing the template on the fly anymore
 	raceResultsTemplate, err := template.ParseFiles("raceResults.template")
 	if err != nil {
 		fmt.Fprintf(w, "Error parsing template - %s", err)
@@ -274,10 +329,16 @@ func main() {
 		fmt.Printf("Error parsing template! - %s\n", err)
 		return
 	}
+	errorTemplate, err = template.ParseFiles("error.template")
+	if err != nil {
+		fmt.Printf("Error parsing template! - %s\n", err)
+		return
+	}
 	go raceFunc()
 	http.HandleFunc("raceresults/", handler)
 	http.HandleFunc("raceresults/admin", handler)
-	http.HandleFunc("raceresults/bib", bibHandler)
+	http.HandleFunc("raceresults/linkBib", linkBib)
+	http.HandleFunc("raceresults/assignBib", assignBib)
 	http.HandleFunc("raceresults/download", download)
 	http.HandleFunc("raceresults/uploadRacers", uploadRacers)
 	http.Handle("/", http.RedirectHandler("http://raceresults/", 307))

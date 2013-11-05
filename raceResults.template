@@ -30,10 +30,11 @@
 	<body>
 		{{if .Admin}}
 			{{if .Next}}
-				<form action="bib" method="post">
-					<label for="bib">Set Bib for Overall Place #{{.Next}}</label>
+				<form action="linkBib" method="post">
+					<label for="bib">Bib #</label>
 					<input type="number" name="bib" id="bib" required="required" autofocus>
-					<input type="hidden" name="next" value="{{.Next}}">
+					<label for="next">Overall Place #</label>
+					<input type="number" name="next" id="next" required="required" value="{{.Next}}">
 					<button type="submit">Submit</button>
 				</form>
 			{{else}}
@@ -45,6 +46,34 @@
 				<button type="submit">Upload</button>
 			</form>
 			<a href="/download">Download</a>
+		{{end}}
+		{{if .Unbibbed}}
+			<table>
+				<tr>
+					<th>Assign Bib</th>
+					<th>First</th>
+					<th>Last</th>
+					<th>Age</th>
+					<th>Gender</th>
+					<th>T-Shirt</th>
+				</tr>
+				{{range $id , $unbibbed := .Unbibbed}}
+					<tr>
+						<td>
+							<form action="assignBib" method="post">
+								<input type="number" name="bib" required="required">
+								<input type="hidden" name="id" value="{{$id}}">
+								<button type="submit">Set</button>
+							</form>
+						</td>
+						<td>{{$unbibbed.Fname}}</td>
+						<td>{{$unbibbed.Lname}}</td>
+						<td>{{$unbibbed.Age}}</td>
+						<td>{{if $unbibbed.Male}}M{{else}}F{{end}}</td>
+						<td>{{$unbibbed.TShirt}}</td>
+					</tr>
+				{{end}}
+			</table>
 		{{end}}
 		{{if .Start}}
 			<h1 id="time">{{.Time}}</h1>

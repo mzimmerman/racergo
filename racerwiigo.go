@@ -246,11 +246,11 @@ func main() {
 		return
 	}
 	go raceFunc()
-	http.HandleFunc("www.raceresults.org/", handler)
-	http.HandleFunc("www.raceresults.org/admin", handler)
-	http.HandleFunc("www.raceresults.org/bib", bibHandler)
-	http.HandleFunc("www.raceresults.org/uploadRacers", uploadRacers)
-	http.Handle("/", http.RedirectHandler("http://www.raceresults.org/", 307))
+	http.HandleFunc("raceresults/", handler)
+	http.HandleFunc("raceresults/admin", handler)
+	http.HandleFunc("raceresults/bib", bibHandler)
+	http.HandleFunc("raceresults/uploadRacers", uploadRacers)
+	http.Handle("/", http.RedirectHandler("http://raceresults/", 307))
 	err = http.ListenAndServe(":80", nil)
 	if err != nil {
 		fmt.Printf("Error starting http server! - %s\n", err)

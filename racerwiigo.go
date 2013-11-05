@@ -246,10 +246,11 @@ func main() {
 		return
 	}
 	go raceFunc()
-	http.HandleFunc("/", handler)
-	http.HandleFunc("/admin", handler)
-	http.HandleFunc("/bib", bibHandler)
-	http.HandleFunc("/uploadRacers", uploadRacers)
+	http.HandleFunc("www.raceresults.org/", handler)
+	http.HandleFunc("www.raceresults.org/admin", handler)
+	http.HandleFunc("www.raceresults.org/bib", bibHandler)
+	http.HandleFunc("www.raceresults.org/uploadRacers", uploadRacers)
+	http.Handle("/", http.RedirectHandler("http://www.raceresults.org/", 307))
 	err = http.ListenAndServe(":80", nil)
 	if err != nil {
 		fmt.Printf("Error starting http server! - %s\n", err)
@@ -318,7 +319,7 @@ func raceFunc() {
 		} else { // simulate the pressing of the wiimote A button for testing
 			go func() {
 				simulButton := time.NewTicker(time.Second * 10)
-				//buttonChan <- C.CWIID_BTN_A // start race immediately
+				buttonChan <- C.CWIID_BTN_A // start race immediately
 				//buttonChan <- C.CWIID_BTN_A // first runner! :)
 				for {
 					select {

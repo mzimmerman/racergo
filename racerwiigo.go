@@ -13,8 +13,10 @@ import "C"
 
 import (
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"html/template"
+	"io"
 	"net/http"
 	"os"
 	"reflect"
@@ -50,9 +52,20 @@ var unbibbedEntries map[int]*Entry // map of sequential Ids
 var results []*Result
 var raceResultsTemplate *template.Template
 var errorTemplate *template.Template
-var useWiimote = true
+var useWiimote = false
+var prizes []*Prize
 
 type HumanDuration time.Duration
+
+type Prize struct {
+	Title    string
+	LowAge   uint
+	HighAge  uint
+	Gender   string    // M = only males, F = only Females, O = Overall
+	Amount   uint      // how many people win this prize?
+	WinAgain bool      // if someone has already won another Prize, can they win this again?
+	Winners  []*Result `json:"-"`
+}
 
 type Entry struct {
 	Bib    int
@@ -154,6 +167,63 @@ func download(w http.ResponseWriter, r *http.Request) {
 	writer.Flush()
 }
 
+func uploadPrizes(w http.ResponseWriter, r *http.Request) {
+	reader, err := r.MultipartReader()
+	if err != nil {
+		showErrorForAdmin(w, "Error getting Reader - %s", err)
+		return
+	}
+	part, err := reader.NextPart()
+	if err != nil {
+		showErrorForAdmin(w, "Error getting Part - %s", err)
+		return
+	}
+	jsonin := json.NewDecoder(part)
+	prizes = make([]*Prize, 0)
+	for {
+		var prize Prize
+		err = jsonin.Decode(&prize)
+		if err == io.EOF {
+			break // good, we processed them all!
+		}
+		if err != nil {
+			showErrorForAdmin(w, "Error fetching Prize Configurations - %s", err)
+			return
+		}
+		prizes = append(prizes, &prize)
+	}
+	for _, result := range results {
+		calculatePrizes(result)
+	}
+	http.Redirect(w, r, "/admin", 301)
+}
+
+func calculatePrizes(r *Result) {
+	// prizes are calculated from top-down, meaning all "faster" racers have already been placed
+	if r.Entry == nil {
+		return // can't calculate prizes for someone who hasn't finished the race!
+	}
+	found := false
+	for _, prize := range prizes {
+		switch {
+		case found && !prize.WinAgain:
+			fallthrough
+		case r.Entry.Age < prize.LowAge:
+			fallthrough
+		case r.Entry.Age > prize.HighAge:
+			fallthrough
+		case r.Entry.Male && (prize.Gender == "F"):
+			fallthrough
+		case !r.Entry.Male && (prize.Gender == "M"):
+			fallthrough
+		case len(prize.Winners) == int(prize.Amount):
+			continue // do not qualify any of these conditions
+		}
+		found = true
+		prize.Winners = append(prize.Winners, r)
+	}
+}
+
 func uploadRacers(w http.ResponseWriter, r *http.Request) {
 	reader, err := r.MultipartReader()
 	if err != nil {
@@ -175,9 +245,12 @@ func uploadRacers(w http.ResponseWriter, r *http.Request) {
 		showErrorForAdmin(w, "Either blank file or only supplied the header row")
 		return
 	}
-	// make the maps and unlink all previous relationships (if any)
+	// make the maps and unlink all previous relationships
 	bibbedEntries = make(map[int]*Entry)
 	unbibbedEntries = make(map[int]*Entry)
+	for _, prize := range prizes {
+		prize.Winners = make([]*Result, 0)
+	}
 	for _, result := range results {
 		result.Entry = nil
 	}
@@ -218,7 +291,6 @@ func uploadRacers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	http.Redirect(w, r, "/admin", 301)
-	return
 }
 
 func linkBib(w http.ResponseWriter, r *http.Request) {
@@ -241,6 +313,7 @@ func linkBib(w http.ResponseWriter, r *http.Request) {
 			results[next-1].Entry = bibbedEntries[bib]
 			bibbedEntries[bib].Result = results[next-1]
 			fmt.Printf("Set bib for place %d to %d", next, bib)
+			calculatePrizes(results[next-1])
 		} else {
 			showErrorForAdmin(w, "Bib number %d was not assigned to anyone.", bib)
 			return
@@ -254,7 +327,9 @@ func linkBib(w http.ResponseWriter, r *http.Request) {
 }
 
 func showErrorForAdmin(w http.ResponseWriter, message string, args ...interface{}) {
-	err := errorTemplate.Execute(w, fmt.Sprintf(message, args...))
+	msg := fmt.Sprintf(message, args...)
+	fmt.Println(msg)
+	err := errorTemplate.Execute(w, msg)
 	if err != nil {
 		fmt.Fprintf(w, "Error executing template - %s", err)
 	}
@@ -308,6 +383,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		data["Time"] = HumanDuration(diff).Clock()
 		data["Seconds"] = fmt.Sprintf("%.0f", diff.Seconds())
 		data["NextUpdate"] = diff / time.Millisecond % 1000
+		data["Prizes"] = prizes
 	}
 	// TODO: take this code out once we're not changing the template on the fly anymore
 	raceResultsTemplate, err := template.ParseFiles("raceResults.template")
@@ -340,6 +416,7 @@ func main() {
 	http.HandleFunc("raceresults/assignBib", assignBib)
 	http.HandleFunc("raceresults/download", download)
 	http.HandleFunc("raceresults/uploadRacers", uploadRacers)
+	http.HandleFunc("raceresults/uploadPrizes", uploadPrizes)
 	http.Handle("/", http.RedirectHandler("http://raceresults/", 307))
 	err = http.ListenAndServe(":80", nil)
 	if err != nil {

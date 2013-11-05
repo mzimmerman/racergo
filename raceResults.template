@@ -42,8 +42,13 @@
 			{{end}}
 			<form action="uploadRacers" method="post" enctype="multipart/form-data">
 				<label for="entriesUpload">Upload Registrants CSV</label>
-				<input title="CSV file should have a header row containing at least Fname, Lname, Gender (M/F), and Age" type="file" id="entriesUpload" name="entries" accept="text/csv" required="required">
-				<button type="submit">Upload</button>
+				<input title="CSV file should have a header row containing at least Fname, Lname, Gender (M/F), and Age" type="file" id="entriesUpload" name="entries" required="required">
+				<button type="submit">Upload Entries</button>
+			</form>
+			<form action="uploadPrizes" method="post" enctype="multipart/form-data">
+				<label for="prizesUpload">Upload Prize Config</label>
+				<input type="file" id="prizesUpload" name="prizes" required="required">
+				<button type="submit">Upload Prizes</button>
 			</form>
 			<a href="/download">Download</a>
 		{{end}}
@@ -85,6 +90,12 @@
 			<h3>Race status will auto-refresh every 30 seconds</h3>
 		{{else}}
 			<h3>Race status auto-refresh disabled so as to not disrupt bib input</h3>
+		{{end}}
+		{{range .Prizes}}
+			<h3>{{.Title}}</h3>
+			{{range .Winners}}
+				<span>{{.Entry.Fname}} {{.Entry.Lname}} - {{.Time.String}}</span>
+			{{end}}
 		{{end}}
 		<table>
 			<tr>

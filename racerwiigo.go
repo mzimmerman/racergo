@@ -50,7 +50,7 @@ var unbibbedEntries map[int]*Entry // map of sequential Ids
 var results []*Result
 var raceResultsTemplate *template.Template
 var errorTemplate *template.Template
-var useWiimote = false
+var useWiimote = true
 
 type HumanDuration time.Duration
 
@@ -195,7 +195,10 @@ func uploadRacers(w http.ResponseWriter, r *http.Request) {
 			case "Gender":
 				entry.Male = (rawEntries[row][col] == "M")
 			case "Bib":
-				entry.Bib, _ = strconv.Atoi(rawEntries[row][col])
+				entry.Bib, err = strconv.Atoi(rawEntries[row][col])
+				if err != nil {
+					entry.Bib = -1
+				}
 			case "Email":
 				entry.Email = rawEntries[row][col]
 			case "Phone":
@@ -208,7 +211,7 @@ func uploadRacers(w http.ResponseWriter, r *http.Request) {
 				fmt.Printf("Field %s not imported, dropping\n", rawEntries[0][col])
 			}
 		}
-		if entry.Bib == -1 {
+		if entry.Bib < 0 {
 			unbibbedEntries[row] = entry
 		} else {
 			bibbedEntries[entry.Bib] = entry
@@ -264,26 +267,22 @@ func assignBib(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bib, err := strconv.Atoi(r.FormValue("bib"))
-	if bib < 0 {
-		showErrorForAdmin(w, "Cannot assign a negative bib number of %d", bib)
+	if bib < 0 || err != nil {
+		showErrorForAdmin(w, "Could not get a valid bib number from %s", r.FormValue("bib"))
 		return
 	}
-	if err == nil {
-		if entry, ok := unbibbedEntries[id]; ok {
-			if _, ok = bibbedEntries[bib]; ok {
-				showErrorForAdmin(w, "Bib # %d already assigned!", bib)
-				return
-			}
-			entry.Bib = bib
-			fmt.Printf("Set bib for %s %s to %d", entry.Fname, entry.Lname, bib)
-			delete(unbibbedEntries, id)
-			bibbedEntries[entry.Bib] = entry
-		} else {
-			showErrorForAdmin(w, "Id %d was not assigned to anyone.", id)
+	if entry, ok := unbibbedEntries[id]; ok {
+		if _, ok = bibbedEntries[bib]; ok {
+			showErrorForAdmin(w, "Bib # %d already assigned to %s %s!", bib, bibbedEntries[bib].Fname, bibbedEntries[bib].Lname)
 			return
 		}
+		entry.Bib = bib
+		fmt.Printf("Set bib for %s %s to %d", entry.Fname, entry.Lname, bib)
+		delete(unbibbedEntries, id)
+		bibbedEntries[entry.Bib] = entry
 	} else {
-		fmt.Printf("Error %s assigning bib for id %d to %d", err, id, bib)
+		showErrorForAdmin(w, "Id %d was not assigned to anyone.", id)
+		return
 	}
 	http.Redirect(w, r, "/admin", 301)
 	return
@@ -291,24 +290,24 @@ func assignBib(w http.ResponseWriter, r *http.Request) {
 
 func handler(w http.ResponseWriter, r *http.Request) {
 	data := map[string]interface{}{"Racers": results}
+	if strings.HasSuffix(r.RequestURI, "admin") {
+		data["Admin"] = true
+		if len(unbibbedEntries) > 0 {
+			data["Unbibbed"] = unbibbedEntries
+		}
+		for x := range results {
+			if results[x].Entry == nil {
+				data["Next"] = results[x].Place
+				break
+			}
+		}
+	}
 	if start != nil {
 		diff := time.Since(*start)
 		data["Start"] = start.Format("3:04:05")
 		data["Time"] = HumanDuration(diff).Clock()
 		data["Seconds"] = fmt.Sprintf("%.0f", diff.Seconds())
 		data["NextUpdate"] = diff / time.Millisecond % 1000
-		if strings.HasSuffix(r.RequestURI, "admin") {
-			data["Admin"] = true
-			for x := range results {
-				if results[x].Entry == nil {
-					data["Next"] = results[x].Place
-					break
-				}
-			}
-			if len(unbibbedEntries) > 0 {
-				data["Unbibbed"] = unbibbedEntries
-			}
-		}
 	}
 	// TODO: take this code out once we're not changing the template on the fly anymore
 	raceResultsTemplate, err := template.ParseFiles("raceResults.template")

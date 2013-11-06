@@ -116,7 +116,11 @@
 						<p class="text-center">Race status auto-refresh disabled so as to not disrupt bib input</p>
 					{{end}}
 				</div>
-				{{range .Prizes}}
+			</div>
+		</div>
+		<div class="container">
+			{{range .Prizes}}
+				{{if .Winners}}
 					<div class="col-md-2">
 						<h3>{{.Title}}</h3>
 						{{range .Winners}}
@@ -124,7 +128,7 @@
 						{{end}}
 					</div>
 				{{end}}
-			</div>
+			{{end}}
 		</div>
 		<div class="container">
 			<table class="table table-bordered table-condensed table-striped">

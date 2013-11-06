@@ -1,5 +1,9 @@
-<html>
+<!DOCTYPE html>
+<html lang="en">
 	<head>
+		<title>Race Results</title>
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<link rel="stylesheet" media="screen" href="/static/bootstrap.min.css">
 		{{if not .Next}}
 			<meta http-equiv="refresh" content="30">
 		{{end}}
@@ -28,92 +32,121 @@
 		{{end}}
 	</head>
 	<body>
-		{{if .Admin}}
-			{{if .Next}}
-				<form action="linkBib" method="post">
-					<label for="bib">Bib #</label>
-					<input type="number" name="bib" id="bib" required="required" autofocus>
-					<label for="next">Overall Place #</label>
-					<input type="number" name="next" id="next" required="required" value="{{.Next}}">
-					<button type="submit">Submit</button>
-				</form>
+		<div class="row">
+			{{if .Admin}}
+				<div class="col-md-6">
+					{{if .Next}}
+						<form class="form-inline" role="form" action="linkBib" method="post">
+							<div class="form-group">
+								<label class="sr-only" for="next">Overall Place #</label>
+								<input class="form-control" type="number" name="next" id="next" required="required" placeholder="Overall Place #" value="{{.Next}}">
+							</div>
+							<div class="form-group">
+								<label class="sr-only" for="bib">Bib #</label>
+								<input class="form-control" type="number" name="bib" id="bib" required="required" placeholder="Bib#" autofocus>
+							</div>
+							<button class="btn btn-default" type="submit">Link</button>
+						</form>
+					{{end}}
+					<form class="form-inline" role="form" action="uploadRacers" method="post" enctype="multipart/form-data">
+						<div class="form-group">
+							<label class="sr-only" for="entriesUpload">Upload Registrants CSV</label>
+							<input title="CSV file should have a header row containing at least Fname, Lname, Gender (M/F), and Age." class="form-control" type="file" id="entriesUpload" name="entries" required="required">
+						</div>
+						<button class="btn btn-default" type="submit">Upload Entries</button>
+					</form>
+					<form class="form-inline" role="form" action="uploadPrizes" method="post" enctype="multipart/form-data">
+						<div class="form-group">
+							<label class="sr-only" for="prizesUpload">Upload Prize Config</label>
+							<input title="Upload Prize Config" class="form-control" type="file" id="prizesUpload" name="prizes" required="required">
+						</div>
+						<button class="btn btn-default" type="submit">Upload Prizes</button>
+					</form>
+					<a class="btn btn-default" href="/download">Download Results</a>
+					{{if .Unbibbed}}
+						<table class="table table-bordered table-condensed">
+							<tr>
+								<th>Assign Bib</th>
+								<th>First</th>
+								<th>Last</th>
+								<th>Age</th>
+								<th>Gender</th>
+								<th>T-Shirt</th>
+							</tr>
+							<tbody>
+							{{$autofocus := 1}}
+							{{range $id , $unbibbed := .Unbibbed}}
+								<tr>
+									<td>
+										<form class="inline-form" role="form" action="assignBib" method="post">
+										<input type="hidden" name="id" value="{{$id}}">
+											<div class="form-group">
+												<div class="col-md-6">
+													<input class="form-control " type="number" name="bib" required="required" placeholder="Bib #">
+												</div>
+											</div>
+											<button class="btn btn-default" type="submit">Set</button>
+										</form>
+									</td>
+									<td>{{$unbibbed.Fname}}</td>
+									<td>{{$unbibbed.Lname}}</td>
+									<td>{{$unbibbed.Age}}</td>
+									<td>{{if $unbibbed.Male}}M{{else}}F{{end}}</td>
+									<td>{{$unbibbed.TShirt}}</td>
+								</tr>
+							{{end}}
+							</tbody>
+						</table>
+					{{end}}
+				</div>
+				<div class="col-md-6">
 			{{else}}
-				<h1>All bib #'s entered for results, waiting for next finisher</h1>
+				<div class="col-md-12">
 			{{end}}
-			<form action="uploadRacers" method="post" enctype="multipart/form-data">
-				<label for="entriesUpload">Upload Registrants CSV</label>
-				<input title="CSV file should have a header row containing at least Fname, Lname, Gender (M/F), and Age" type="file" id="entriesUpload" name="entries" required="required">
-				<button type="submit">Upload Entries</button>
-			</form>
-			<form action="uploadPrizes" method="post" enctype="multipart/form-data">
-				<label for="prizesUpload">Upload Prize Config</label>
-				<input type="file" id="prizesUpload" name="prizes" required="required">
-				<button type="submit">Upload Prizes</button>
-			</form>
-			<a href="/download">Download</a>
-		{{end}}
-		{{if .Unbibbed}}
-			<table>
+				<div class="jumbotron">
+					{{if .Start}}
+						<h1 class="text-center" id="time">{{.Time}}</h1>
+						<p class="text-center">Race started at {{.Start}}</p>
+					{{else}}
+						<h1 class="text-center">00:00:00</h1>
+					{{end}}
+					{{if not .Next}}
+						<p class="text-center">Race status will auto-refresh every 30 seconds</p>
+					{{else}}
+						<p class="text-center">Race status auto-refresh disabled so as to not disrupt bib input</p>
+					{{end}}
+				</div>
+				{{range .Prizes}}
+					<div class="col-md-2">
+						<h3>{{.Title}}</h3>
+						{{range .Winners}}
+							<span>{{.Entry.Fname}} {{.Entry.Lname}} <strong>{{.Time.String}}</strong></span>
+						{{end}}
+					</div>
+				{{end}}
+			</div>
+		</div>
+		<div class="container">
+			<table class="table table-bordered table-condensed table-striped">
 				<tr>
-					<th>Assign Bib</th>
+					<th>Overall Place</th>
+					<th>Time</th>
+					<th>Bib #</th>
 					<th>First</th>
 					<th>Last</th>
-					<th>Age</th>
-					<th>Gender</th>
-					<th>T-Shirt</th>
 				</tr>
-				{{range $id , $unbibbed := .Unbibbed}}
+				<tbody>
+				{{range .Racers}}
 					<tr>
-						<td>
-							<form action="assignBib" method="post">
-								<input type="number" name="bib" required="required">
-								<input type="hidden" name="id" value="{{$id}}">
-								<button type="submit">Set</button>
-							</form>
-						</td>
-						<td>{{$unbibbed.Fname}}</td>
-						<td>{{$unbibbed.Lname}}</td>
-						<td>{{$unbibbed.Age}}</td>
-						<td>{{if $unbibbed.Male}}M{{else}}F{{end}}</td>
-						<td>{{$unbibbed.TShirt}}</td>
+						<td>{{.Place}}</td>
+						<td>{{.Time}}</td>
+						<td>{{with .Entry}}{{.Bib}}{{end}}</td>
+						<td>{{with .Entry}}{{.Fname}}{{end}}</td>
+						<td>{{with .Entry}}{{.Lname}}{{end}}</td>
 					</tr>
 				{{end}}
+				</tbody>
 			</table>
-		{{end}}
-		{{if .Start}}
-			<h1 id="time">{{.Time}}</h1>
-			<h2>Race started at {{.Start}}</h2>
-		{{else}}
-			<h1>Not Started</h1>
-		{{end}}
-		{{if not .Next}}
-			<h3>Race status will auto-refresh every 30 seconds</h3>
-		{{else}}
-			<h3>Race status auto-refresh disabled so as to not disrupt bib input</h3>
-		{{end}}
-		{{range .Prizes}}
-			<h3>{{.Title}}</h3>
-			{{range .Winners}}
-				<span>{{.Entry.Fname}} {{.Entry.Lname}} - {{.Time.String}}</span>
-			{{end}}
-		{{end}}
-		<table>
-			<tr>
-				<th>Overall Place</th>
-				<th>Time</th>
-				<th>Bib #</th>
-				<th>First</th>
-				<th>Last</th>
-			</tr>
-			{{range .Racers}}
-				<tr>
-					<td>{{.Place}}</td>
-					<td>{{.Time}}</td>
-					<td>{{with .Entry}}{{.Bib}}{{end}}</td>
-					<td>{{with .Entry}}{{.Fname}}{{end}}</td>
-					<td>{{with .Entry}}{{.Lname}}{{end}}</td>
-				</tr>
-			{{end}}
-		</table>
+		</div>
 	</body>
 </html>

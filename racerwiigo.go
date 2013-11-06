@@ -417,6 +417,7 @@ func main() {
 	http.HandleFunc("raceresults/download", download)
 	http.HandleFunc("raceresults/uploadRacers", uploadRacers)
 	http.HandleFunc("raceresults/uploadPrizes", uploadPrizes)
+	http.Handle("raceresults/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static/"))))
 	http.Handle("/", http.RedirectHandler("http://raceresults/", 307))
 	err = http.ListenAndServe(":80", nil)
 	if err != nil {

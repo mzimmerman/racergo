@@ -40,10 +40,16 @@ var buttons = []_Ctype_uint16_t{ // only HOME and A buttons are used for this pr
 	//C.CWIID_BTN_PLUS,
 }
 
+const (
+	Disconnected int8 = iota
+	Error        int8 = iota
+	Finished     int8 = iota
+)
+
 var buttonStatus []bool
 
-var buttonChan chan _Ctype_uint16_t
-var exit chan bool
+var racerChan chan time.Time
+var statusChan chan int8
 var callback = goCwiidCallback // so it's not garbage collected
 var errCallback = goErrCallback
 var start *time.Time
@@ -52,7 +58,7 @@ var unbibbedEntries map[int]*Entry // map of sequential Ids
 var results []*Result
 var raceResultsTemplate *template.Template
 var errorTemplate *template.Template
-var useWiimote = false
+var useWiimote = true
 var prizes []*Prize
 
 type HumanDuration time.Duration
@@ -106,14 +112,17 @@ func goCwiidCallback(wm unsafe.Pointer, a int, mesg *C.struct_cwiid_btn_mesg, tp
 	sliceHeader.Data = uintptr(unsafe.Pointer(mesg))
 	for _, m := range messages {
 		if m._type != C.CWIID_MESG_BTN {
-			exit <- true
+			statusChan <- Error
 			continue
 		}
-		//fmt.Printf("Received message - %#v\n", m)
 		for x, button := range buttons {
 			if m.buttons&button == button {
 				if !buttonStatus[x] {
-					buttonChan <- button
+					if button == C.CWIID_BTN_A {
+						racerChan <- time.Now()
+					} else if button == C.CWIID_BTN_HOME {
+						statusChan <- Finished
+					}
 					buttonStatus[x] = true
 				}
 			} else {
@@ -136,9 +145,10 @@ func goErrCallback(wm unsafe.Pointer, char *C.char, ap unsafe.Pointer) {
 	case "Socket connect error (control channel)":
 		fallthrough
 	case "No wiimotes found":
-		exit <- true
+		statusChan <- Disconnected
 	default:
 		fmt.Printf("Inside error calback - %s\n", str)
+		statusChan <- Error
 	}
 }
 
@@ -434,9 +444,9 @@ func raceFunc() {
 	buttonStatus = make([]bool, len(buttons))
 	var bdaddr C.bdaddr_t
 	var wm *C.struct_cwiid_wiimote_t
-	buttonChan = make(chan _Ctype_uint16_t, 1)
-	exit = make(chan bool, 1)
-	ticker := time.NewTicker(time.Second)
+	racerChan = make(chan time.Time, 10) // queue up to 10 racers at a time, since we're storing the time they crossed, we don't have to display/process them right away
+	statusChan = make(chan int8, 1)
+	ticker := time.NewTicker(time.Second * 10)
 	results = make([]*Result, 0, 1024)
 	var err error
 	if useWiimote {
@@ -450,21 +460,21 @@ func raceFunc() {
 	outer:
 		for {
 			// clear both channels
+			fmt.Println("Clearing the channels")
 			select {
-			case <-buttonChan:
-			case <-exit:
+			case <-statusChan:
+			case <-racerChan:
 			default:
 				break outer
 			}
 		}
-		fmt.Println("Press 1&2 on the Wiimote now")
 		if useWiimote {
+			fmt.Println("Press 1&2 on the Wiimote now")
 			wm, err = C.cwiid_open(&bdaddr, 0)
 			if err != nil {
 				fmt.Errorf("cwiid_open: %v\n", err)
 				continue
 			}
-
 			res, err := C.cwiid_command(wm, C.CWIID_CMD_RPT_MODE, C.CWIID_RPT_BTN)
 			if res != 0 || err != nil {
 				fmt.Printf("Result of command = %d - %v\n", res, err)
@@ -487,12 +497,11 @@ func raceFunc() {
 		} else { // simulate the pressing of the wiimote A button for testing
 			go func() {
 				simulButton := time.NewTicker(time.Second * 10)
-				buttonChan <- C.CWIID_BTN_A // start race immediately
-				//buttonChan <- C.CWIID_BTN_A // first runner! :)
+				racerChan <- time.Now() // start race immediately
 				for {
 					select {
 					case <-simulButton.C:
-						buttonChan <- C.CWIID_BTN_A
+						racerChan <- time.Now()
 					}
 				}
 			}()
@@ -500,48 +509,37 @@ func raceFunc() {
 	loop:
 		for {
 			select {
-			case <-exit:
-				fmt.Println("Wiimote lost connection!")
-				break loop
-			case button := <-buttonChan:
-				switch button {
-				case C.CWIID_BTN_A:
-					if start == nil {
-						start = new(time.Time)
-						*start = time.Now()
-						fmt.Printf("Race started @ %s\n", start.Format("3:04:05"))
-						results = results[:0]
-					} else {
-						place := len(results)
-						results = append(results, &Result{Place: uint(place + 1), Time: HumanDuration(time.Now().Sub(*start))})
-						fmt.Printf("#%d - %s\n", results[place].Place, results[place].Time)
-					}
-				//case C.CWIID_BTN_B:
-				//	fmt.Println("B")
-				//case C.CWIID_BTN_1:
-				//	fmt.Println("1")
-				//case C.CWIID_BTN_2:
-				//	fmt.Println("2")
-				//case C.CWIID_BTN_MINUS:
-				//	fmt.Println("Minus")
-				case C.CWIID_BTN_HOME:
+			case status := <-statusChan:
+				if status == Finished {
+					ticker.Stop()
 					fmt.Println("Race finished!")
+					// just stop listening for button presses on the wiimote, the race website can continue to run
 					return
-					//case C.CWIID_BTN_LEFT:
-					//	fmt.Println("Left")
-					//case C.CWIID_BTN_RIGHT:
-					//	fmt.Println("Right")
-					//case C.CWIID_BTN_DOWN:
-					//	fmt.Println("Down")
-					//case C.CWIID_BTN_UP:
-					//	fmt.Println("Up")
-					//case C.CWIID_BTN_PLUS:
-					//	fmt.Println("Plus")
+				} else if status == Disconnected {
+					fmt.Println("Wiimote lost connection")
+					break loop // this takes us to the large loop above so that the wiimote can reconnect
+				} else if status == Error {
+					fmt.Println("An error occurred when communicating with the wiimote")
+					break loop // this takes us to the large loop above so that the wiimote can reconnect
+				}
+			case t := <-racerChan:
+				if start == nil {
+					start = &t
+					ticker.Stop() // stop and "upgrade" the ticker for every second to track time
+					ticker = time.NewTicker(time.Second)
+					fmt.Printf("Race started @ %s\n", start.Format("3:04:05"))
+					results = results[:0]
+				} else {
+					place := len(results)
+					results = append(results, &Result{Place: uint(place + 1), Time: HumanDuration(t.Sub(*start))})
+					fmt.Printf("#%d - %s\n", results[place].Place, results[place].Time)
 				}
 			case now := <-ticker.C:
 				if start != nil {
 					diff := HumanDuration(now.Sub(*start))
 					fmt.Println(diff)
+				} else {
+					fmt.Println("Waiting to start the race")
 				}
 				// update the clock
 			}

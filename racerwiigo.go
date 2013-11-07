@@ -53,12 +53,13 @@ var statusChan chan int8
 var callback = goCwiidCallback // so it's not garbage collected
 var errCallback = goErrCallback
 var start *time.Time
+var optionalEntryFields []string
 var bibbedEntries map[int]*Entry   // map of Bib #s
 var unbibbedEntries map[int]*Entry // map of sequential Ids
 var results []*Result
 var raceResultsTemplate *template.Template
 var errorTemplate *template.Template
-var useWiimote = true
+var useWiimote = false
 var prizes []*Prize
 
 type HumanDuration time.Duration
@@ -74,16 +75,13 @@ type Prize struct {
 }
 
 type Entry struct {
-	Bib    int
-	Fname  string
-	Lname  string
-	Male   bool
-	Age    uint
-	Email  string
-	Phone  string
-	Date   string
-	TShirt string
-	Result *Result
+	Bib      int
+	Fname    string
+	Lname    string
+	Male     bool
+	Age      uint
+	Optional []string
+	Result   *Result
 }
 
 type Result struct {
@@ -161,16 +159,18 @@ func download(w http.ResponseWriter, r *http.Request) {
 		length = len(results)
 	}
 	csvData := make([][]string, 0, length+1)
-	csvData = append(csvData, []string{"Fname", "Lname", "Age", "Bib", "Overall Place", "Time"})
+	headerRow := append([]string{"Fname", "Lname", "Age", "Bib", "Overall Place", "Time"}, optionalEntryFields...)
+	blank := make([]string, len(optionalEntryFields))
+	csvData = append(csvData, headerRow)
 	for _, result := range results {
 		if result.Entry == nil {
-			csvData = append(csvData, []string{"", "", "", "", strconv.Itoa(int(result.Place)), result.Time.String()})
+			csvData = append(csvData, append([]string{"", "", "", "", strconv.Itoa(int(result.Place)), result.Time.String()}, blank...))
 		} else {
-			csvData = append(csvData, []string{result.Entry.Fname, result.Entry.Lname, strconv.Itoa(int(result.Entry.Age)), strconv.Itoa(int(result.Entry.Bib)), strconv.Itoa(int(result.Place)), result.Time.String()})
+			csvData = append(csvData, append([]string{result.Entry.Fname, result.Entry.Lname, strconv.Itoa(int(result.Entry.Age)), strconv.Itoa(int(result.Entry.Bib)), strconv.Itoa(int(result.Place)), result.Time.String()}, result.Entry.Optional...))
 		}
 	}
 	for _, entry := range unbibbedEntries {
-		csvData = append(csvData, []string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), "", "", ""})
+		csvData = append(csvData, append([]string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), "", "", ""}, entry.Optional...))
 	}
 	writer := csv.NewWriter(w)
 	writer.WriteAll(csvData)
@@ -264,8 +264,23 @@ func uploadRacers(w http.ResponseWriter, r *http.Request) {
 	for _, result := range results {
 		result.Entry = nil
 	}
+	// initialize the optionalEntryFields for use when we export/display the data
+	optionalEntryFields = make([]string, 0)
+	for col := range rawEntries[0] {
+		switch rawEntries[0][col] {
+		case "Fname":
+		case "Lname":
+		case "Age":
+		case "Gender":
+		case "Bib":
+		default:
+			optionalEntryFields = append(optionalEntryFields, rawEntries[0][col])
+		}
+	}
+	// load the data
 	for row := 1; row < len(rawEntries); row++ {
 		entry := &Entry{Bib: -1}
+		entry.Optional = make([]string, 0)
 		for col := range rawEntries[row] {
 			switch rawEntries[0][col] {
 			case "Fname":
@@ -282,16 +297,8 @@ func uploadRacers(w http.ResponseWriter, r *http.Request) {
 				if err != nil {
 					entry.Bib = -1
 				}
-			case "Email":
-				entry.Email = rawEntries[row][col]
-			case "Phone":
-				entry.Phone = rawEntries[row][col]
-			case "Date":
-				entry.Date = rawEntries[row][col]
-			case "TShirt":
-				entry.TShirt = rawEntries[row][col]
 			default:
-				fmt.Printf("Field %s not imported, dropping\n", rawEntries[0][col])
+				entry.Optional = append(entry.Optional, rawEntries[row][col])
 			}
 		}
 		if entry.Bib < 0 {
@@ -379,6 +386,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		data["Admin"] = true
 		if len(unbibbedEntries) > 0 {
 			data["Unbibbed"] = unbibbedEntries
+			data["Optional"] = optionalEntryFields
 		}
 		for x := range results {
 			if results[x].Entry == nil {

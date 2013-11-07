@@ -63,41 +63,6 @@
 						<button class="btn btn-default" type="submit">Upload Prizes</button>
 					</form>
 					<a class="btn btn-default" href="/download">Download Results</a>
-					{{if .Unbibbed}}
-						<table class="table table-bordered table-condensed">
-							<tr>
-								<th>Assign Bib</th>
-								<th>First</th>
-								<th>Last</th>
-								<th>Age</th>
-								<th>Gender</th>
-								<th>T-Shirt</th>
-							</tr>
-							<tbody>
-							{{$autofocus := 1}}
-							{{range $id , $unbibbed := .Unbibbed}}
-								<tr>
-									<td>
-										<form class="inline-form" role="form" action="assignBib" method="post">
-										<input type="hidden" name="id" value="{{$id}}">
-											<div class="form-group">
-												<div class="col-md-6">
-													<input class="form-control " type="number" name="bib" required="required" placeholder="Bib #">
-												</div>
-											</div>
-											<button class="btn btn-default" type="submit">Set</button>
-										</form>
-									</td>
-									<td>{{$unbibbed.Fname}}</td>
-									<td>{{$unbibbed.Lname}}</td>
-									<td>{{$unbibbed.Age}}</td>
-									<td>{{if $unbibbed.Male}}M{{else}}F{{end}}</td>
-									<td>{{$unbibbed.TShirt}}</td>
-								</tr>
-							{{end}}
-							</tbody>
-						</table>
-					{{end}}
 				</div>
 				<div class="col-md-6">
 			{{else}}
@@ -118,6 +83,47 @@
 				</div>
 			</div>
 		</div>
+		{{if and .Admin .Unbibbed}}
+			<div class="container">
+				<table class="table table-bordered table-condensed">
+					<tr>
+						<th>Assign Bib</th>
+						<th>First</th>
+						<th>Last</th>
+						<th>Age</th>
+						<th>Gender</th>
+						{{range .Optional}}
+							<th>{{.}}</th>
+						{{end}}
+					</tr>
+					<tbody>
+					{{$autofocus := 1}}
+					{{range $id , $unbibbed := .Unbibbed}}
+						<tr>
+							<td>
+								<form class="inline-form" role="form" action="assignBib" method="post">
+								<input type="hidden" name="id" value="{{$id}}">
+									<div class="form-group">
+										<div class="col-md-6">
+											<input class="form-control " type="number" name="bib" required="required" placeholder="Bib #">
+										</div>
+									</div>
+									<button class="btn btn-default" type="submit">Set</button>
+								</form>
+							</td>
+							<td>{{$unbibbed.Fname}}</td>
+							<td>{{$unbibbed.Lname}}</td>
+							<td>{{$unbibbed.Age}}</td>
+							<td>{{if $unbibbed.Male}}M{{else}}F{{end}}</td>
+							{{range $unbibbed.Optional}}
+								<td>{{.}}</td>
+							{{end}}
+						</tr>
+					{{end}}
+					</tbody>
+				</table>
+			</div>
+		{{end}}
 		<div class="container">
 			{{range .Prizes}}
 				{{if .Winners}}

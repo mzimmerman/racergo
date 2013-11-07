@@ -128,10 +128,14 @@
 			{{range .Prizes}}
 				{{if .Winners}}
 					<div class="col-md-2">
-						<h3>{{.Title}}</h3>
-						{{range .Winners}}
-							<span>{{.Entry.Fname}} {{.Entry.Lname}} <strong>{{.Time.String}}</strong></span>
-						{{end}}
+						<div class="panel panel-primary">
+							<div class="panel-heading">{{.Title}}</div>
+							<div class="panel-body">
+								{{range .Winners}}
+									<p>{{.Entry.Fname}} {{.Entry.Lname}}<span class="badge badge-success pull-right">{{.Time.String}}</span></p>
+								{{end}}
+							</div>
+						</div>
 					</div>
 				{{end}}
 			{{end}}

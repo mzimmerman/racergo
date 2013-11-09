@@ -427,7 +427,22 @@ func main() {
 		fmt.Printf("Error parsing template! - %s\n", err)
 		return
 	}
-	go raceFunc()
+	ready := make(chan bool)
+	go raceFunc(ready)
+	<-ready
+	close(ready)
+	if !useWiimote { // simulate the pressing of the wiimote A button for testing
+		go func() {
+			simulButton := time.NewTicker(time.Second * 10)
+			racerChan <- time.Now() // start race immediately
+			for {
+				select {
+				case <-simulButton.C:
+					racerChan <- time.Now()
+				}
+			}
+		}()
+	}
 	http.HandleFunc("raceresults/", handler)
 	http.HandleFunc("raceresults/admin", handler)
 	http.HandleFunc("raceresults/linkBib", linkBib)
@@ -448,12 +463,15 @@ func main() {
 	}
 }
 
-func raceFunc() {
+func raceFunc(ready chan bool) {
+	defer close(ready)
 	buttonStatus = make([]bool, len(buttons))
 	var bdaddr C.bdaddr_t
 	var wm *C.struct_cwiid_wiimote_t
 	racerChan = make(chan time.Time, 10) // queue up to 10 racers at a time, since we're storing the time they crossed, we don't have to display/process them right away
 	statusChan = make(chan int8, 1)
+	ready <- true
+	close(ready)
 	ticker := time.NewTicker(time.Second * 10)
 	results = make([]*Result, 0, 1024)
 	var err error
@@ -468,7 +486,6 @@ func raceFunc() {
 	outer:
 		for {
 			// clear both channels
-			fmt.Println("Clearing the channels")
 			select {
 			case <-statusChan:
 			case <-racerChan:
@@ -502,17 +519,6 @@ func raceFunc() {
 				fmt.Printf("Set led result = %d\n", res)
 				fmt.Errorf("Err = %v", err)
 			}
-		} else { // simulate the pressing of the wiimote A button for testing
-			go func() {
-				simulButton := time.NewTicker(time.Second * 10)
-				racerChan <- time.Now() // start race immediately
-				for {
-					select {
-					case <-simulButton.C:
-						racerChan <- time.Now()
-					}
-				}
-			}()
 		}
 	loop:
 		for {

@@ -12,12 +12,15 @@ package main
 import "C"
 
 import (
+	"bytes"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"reflect"
 	"strconv"
@@ -416,6 +419,38 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func uploadFile(filename string) (*http.Request, error) {
+	// Create buffer
+	buf := new(bytes.Buffer) // caveat IMO dont use this for large files, \
+	// create a tmpfile and assemble your multipart from there (not tested)
+	w := multipart.NewWriter(buf)
+	// Create a form field writer for field label
+	fw, err := w.CreateFormFile("upload", filename)
+	if err != nil {
+		return nil, err
+	}
+	fd, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer fd.Close()
+	// Write file field from file to upload
+	_, err = io.Copy(fw, fd)
+	if err != nil {
+		return nil, err
+	}
+	// Important if you do not close the multipart writer you will not have a
+	// terminating boundry
+	w.Close()
+	req, err := http.NewRequest("POST", "", buf)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	return req, nil
+	//io.Copy(os.Stderr, res.Body) // Replace this with Status.Code check
+}
+
 func main() {
 	var err error
 	raceResultsTemplate, err = template.ParseFiles("raceResults.template")
@@ -431,7 +466,16 @@ func main() {
 	ready := make(chan bool)
 	go raceFunc(ready)
 	<-ready
-	close(ready)
+	req, err := uploadFile("prizes.json")
+	if err == nil {
+		resp := httptest.NewRecorder()
+		uploadPrizes(resp, req)
+		if resp.Code != 301 {
+			fmt.Println("Unable to load the default prizes.json file.")
+		}
+	} else {
+		fmt.Printf("Unable to load the default prizes.json file - %v\n", err)
+	}
 	if !useWiimote { // simulate the pressing of the wiimote A button for testing
 		go func() {
 			simulButton := time.NewTicker(time.Second * 10)
@@ -465,7 +509,6 @@ func main() {
 }
 
 func raceFunc(ready chan bool) {
-	defer close(ready)
 	buttonStatus = make([]bool, len(buttons))
 	var bdaddr C.bdaddr_t
 	var wm *C.struct_cwiid_wiimote_t

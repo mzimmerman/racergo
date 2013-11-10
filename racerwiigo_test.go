@@ -1,13 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"github.com/remogatto/prettytest"
-	"io"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"runtime"
 	"strconv"
 	"testing"
@@ -34,40 +30,13 @@ func startRace() {
 	racerChan <- time.Now() // start the race
 }
 
-func uploadFile(filename string) (*http.Request, error) {
-	// Create buffer
-	buf := new(bytes.Buffer) // caveat IMO dont use this for large files, \
-	// create a tmpfile and assemble your multipart from there (not tested)
-	w := multipart.NewWriter(buf)
-	// Create a form field writer for field label
-	fw, err := w.CreateFormFile("upload", filename)
-	if err != nil {
-		return nil, err
-	}
-	fd, err := os.Open(filename)
-	if err != nil {
-		return nil, err
-	}
-	defer fd.Close()
-	// Write file field from file to upload
-	_, err = io.Copy(fw, fd)
-	if err != nil {
-		return nil, err
-	}
-	// Important if you do not close the multipart writer you will not have a
-	// terminating boundry
-	w.Close()
-	req, err := http.NewRequest("POST", "", buf)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", w.FormDataContentType())
-	return req, nil
-	//io.Copy(os.Stderr, res.Body) // Replace this with Status.Code check
+func stopRace() {
+	statusChan <- Finished
 }
 
 func (t *testSuite) TestLoadRacers() {
 	startRace()
+	defer stopRace()
 	// race is started, load the racers
 	req, err := uploadFile("test_runners.csv")
 	t.Nil(err)
@@ -99,6 +68,7 @@ func (t *testSuite) TestLoadRacers() {
 
 func (t *testSuite) TestPrizes() {
 	startRace()
+	defer stopRace()
 	// race is started, load the racers
 	req, err := uploadFile("prizes.json")
 	t.Nil(err)

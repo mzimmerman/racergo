@@ -311,12 +311,13 @@ func uploadRacers(w http.ResponseWriter, r *http.Request) {
 }
 
 func linkBib(w http.ResponseWriter, r *http.Request) {
-	next, err := strconv.Atoi(r.FormValue("next"))
+	err := r.ParseForm()
+	next, err := strconv.Atoi(r.Form.Get("next"))
 	if err != nil || next > len(results) {
 		showErrorForAdmin(w, "Error %s getting next", err)
 		return
 	}
-	bib, err := strconv.Atoi(r.FormValue("bib"))
+	bib, err := strconv.Atoi(r.Form.Get("bib"))
 	if bib < 0 {
 		showErrorForAdmin(w, "Cannot assign a negative bib number of %d", bib)
 		return
@@ -329,7 +330,7 @@ func linkBib(w http.ResponseWriter, r *http.Request) {
 			}
 			results[next-1].Entry = bibbedEntries[bib]
 			bibbedEntries[bib].Result = results[next-1]
-			fmt.Printf("Set bib for place %d to %d", next, bib)
+			fmt.Printf("Set bib for place %d to %d\n", next, bib)
 			calculatePrizes(results[next-1])
 		} else {
 			showErrorForAdmin(w, "Bib number %d was not assigned to anyone.", bib)

@@ -53,17 +53,20 @@ func (t *testSuite) TestLoadRacers() {
 	w = httptest.NewRecorder()
 	uploadRacers(w, req)
 	t.Equal(w.Code, 301)
+	mutex.Lock()
 	t.Equal(len(bibbedEntries), 4)
 	t.Equal(len(unbibbedEntries), 4)
-
+	mutex.Unlock()
 	req, err = uploadFile("test_runners3.csv")
 	t.Nil(err)
 	t.Not(t.Nil(req))
 	w = httptest.NewRecorder()
 	uploadRacers(w, req)
 	t.Equal(w.Code, 301)
+	mutex.Lock()
 	t.Equal(len(bibbedEntries), 0)
 	t.Equal(len(unbibbedEntries), 8)
+	mutex.Unlock()
 }
 
 func (t *testSuite) TestPrizes() {
@@ -76,7 +79,9 @@ func (t *testSuite) TestPrizes() {
 	w := httptest.NewRecorder()
 	uploadPrizes(w, req)
 	t.Equal(w.Code, 301)
+	mutex.Lock()
 	t.Equal(len(prizes), 26)
+	mutex.Unlock()
 
 	req, err = uploadFile("test_runners_prizes.csv")
 	t.Nil(err)
@@ -85,22 +90,24 @@ func (t *testSuite) TestPrizes() {
 	uploadRacers(w, req)
 	t.Equal(w.Code, 301)
 	now := time.Now()
+	mutex.Lock()
 	for x := 0; x < len(bibbedEntries); x++ {
 		now = now.Add(time.Second)
 		racerChan <- time.Now() // have everyone cross the line with different times
 	}
-	//for {
-	//	if len(results) >= len(bibbedEntries) {
-	//		break //all done processing
-	//	}
+	mutex.Unlock()
+	bibslength := 0
 	for {
-		if len(results) == len(bibbedEntries) {
+		mutex.Lock()
+		if len(results) >= len(bibbedEntries) {
+			bibslength = len(bibbedEntries)
+			mutex.Unlock()
 			break
 		}
+		mutex.Unlock()
 		runtime.Gosched()
 	}
-	//}
-	for x := 1; x <= len(bibbedEntries); x++ {
+	for x := 1; x <= bibslength; x++ {
 		req, err = http.NewRequest("post", "", nil)
 		req.ParseForm()
 		req.Form.Set("next", strconv.Itoa(x))
@@ -110,6 +117,7 @@ func (t *testSuite) TestPrizes() {
 		linkBib(w, req)
 		t.Equal(w.Code, 301)
 	}
+	mutex.Lock()
 	t.Equal(len(prizes[0].Winners), 1) // men's overall
 	t.Equal(prizes[0].Winners[0], results[0])
 	t.Equal(len(prizes[2].Winners), 1) // men's u10
@@ -145,7 +153,7 @@ func (t *testSuite) TestPrizes() {
 	t.Equal(len(prizes[21].Winners), 0) // women's 51-55
 	t.Equal(len(prizes[23].Winners), 0) // women's 56-60
 	t.Equal(len(prizes[25].Winners), 0) // women's 61+
-
+	mutex.Unlock()
 }
 
 func (t *testSuite) TestHumanDuration() {

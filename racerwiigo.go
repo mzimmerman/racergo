@@ -25,6 +25,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unsafe"
 )
@@ -64,6 +65,7 @@ var raceResultsTemplate *template.Template
 var errorTemplate *template.Template
 var useWiimote = false
 var prizes []*Prize
+var mutex sync.Mutex
 
 type HumanDuration time.Duration
 
@@ -157,6 +159,7 @@ func download(w http.ResponseWriter, r *http.Request) {
 	filename := fmt.Sprintf("raceresults-%s.csv", time.Now().In(time.Local).Format("2006-01-02"))
 	w.Header().Set("Content-type", "application/csv")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+	mutex.Lock()
 	length := len(unbibbedEntries)
 	if length > len(results) {
 		length = len(results)
@@ -175,6 +178,7 @@ func download(w http.ResponseWriter, r *http.Request) {
 	for _, entry := range unbibbedEntries {
 		csvData = append(csvData, append([]string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), "", "", ""}, entry.Optional...))
 	}
+	mutex.Unlock()
 	writer := csv.NewWriter(w)
 	writer.WriteAll(csvData)
 	writer.Flush()
@@ -192,6 +196,7 @@ func uploadPrizes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonin := json.NewDecoder(part)
+	mutex.Lock()
 	prizes = make([]*Prize, 0)
 	for {
 		var prize Prize
@@ -201,6 +206,7 @@ func uploadPrizes(w http.ResponseWriter, r *http.Request) {
 		}
 		if err != nil {
 			showErrorForAdmin(w, "Error fetching Prize Configurations - %s", err)
+			mutex.Unlock()
 			return
 		}
 		prizes = append(prizes, &prize)
@@ -208,6 +214,7 @@ func uploadPrizes(w http.ResponseWriter, r *http.Request) {
 	for _, result := range results {
 		calculatePrizes(result)
 	}
+	mutex.Unlock()
 	http.Redirect(w, r, "/admin", 301)
 }
 
@@ -217,6 +224,7 @@ func calculatePrizes(r *Result) {
 		return // can't calculate prizes for someone who hasn't finished the race!
 	}
 	found := false
+	// mutex should already be locked in the parent caller
 	for _, prize := range prizes {
 		switch {
 		case found && !prize.WinAgain:
@@ -258,6 +266,8 @@ func uploadRacers(w http.ResponseWriter, r *http.Request) {
 		showErrorForAdmin(w, "Either blank file or only supplied the header row")
 		return
 	}
+	mutex.Lock()
+
 	// make the maps and unlink all previous relationships
 	bibbedEntries = make(map[int]*Entry)
 	unbibbedEntries = make(map[int]*Entry)
@@ -310,6 +320,7 @@ func uploadRacers(w http.ResponseWriter, r *http.Request) {
 			bibbedEntries[entry.Bib] = entry
 		}
 	}
+	mutex.Unlock()
 	http.Redirect(w, r, "/admin", 301)
 }
 
@@ -325,10 +336,12 @@ func linkBib(w http.ResponseWriter, r *http.Request) {
 		showErrorForAdmin(w, "Cannot assign a negative bib number of %d", bib)
 		return
 	}
+	mutex.Lock()
 	if err == nil {
 		if _, ok := bibbedEntries[bib]; ok {
 			if bibbedEntries[bib].Result != nil {
 				showErrorForAdmin(w, "Bib number %d already crossed the finish line in place #%d", bib, bibbedEntries[bib].Result.Place)
+				mutex.Unlock()
 				return
 			}
 			results[next-1].Entry = bibbedEntries[bib]
@@ -337,12 +350,15 @@ func linkBib(w http.ResponseWriter, r *http.Request) {
 			calculatePrizes(results[next-1])
 		} else {
 			showErrorForAdmin(w, "Bib number %d was not assigned to anyone.", bib)
+			mutex.Unlock()
 			return
 		}
 	} else {
 		showErrorForAdmin(w, "Error %s setting bib for place %d to %d", err, next, bib)
+		mutex.Unlock()
 		return
 	}
+	mutex.Unlock()
 	http.Redirect(w, r, "/admin", 301)
 	return
 }
@@ -367,9 +383,12 @@ func assignBib(w http.ResponseWriter, r *http.Request) {
 		showErrorForAdmin(w, "Could not get a valid bib number from %s", r.FormValue("bib"))
 		return
 	}
+	mutex.Lock()
+
 	if entry, ok := unbibbedEntries[id]; ok {
 		if _, ok = bibbedEntries[bib]; ok {
 			showErrorForAdmin(w, "Bib # %d already assigned to %s %s!", bib, bibbedEntries[bib].Fname, bibbedEntries[bib].Lname)
+			mutex.Unlock()
 			return
 		}
 		entry.Bib = bib
@@ -378,13 +397,16 @@ func assignBib(w http.ResponseWriter, r *http.Request) {
 		bibbedEntries[entry.Bib] = entry
 	} else {
 		showErrorForAdmin(w, "Id %d was not assigned to anyone.", id)
+		mutex.Unlock()
 		return
 	}
+	mutex.Unlock()
 	http.Redirect(w, r, "/admin", 301)
 	return
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
+	mutex.Lock()
 	data := map[string]interface{}{"Racers": results}
 	if strings.HasSuffix(r.RequestURI, "admin") {
 		data["Admin"] = true
@@ -407,6 +429,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		data["NextUpdate"] = diff / time.Millisecond % 1000
 		data["Prizes"] = prizes
 	}
+	mutex.Unlock()
 	// TODO: take this code out once we're not changing the template on the fly anymore
 	raceResultsTemplate, err := template.ParseFiles("raceResults.template")
 	if err != nil {
@@ -512,12 +535,13 @@ func raceFunc(ready chan bool) {
 	buttonStatus = make([]bool, len(buttons))
 	var bdaddr C.bdaddr_t
 	var wm *C.struct_cwiid_wiimote_t
+	mutex.Lock()
 	racerChan = make(chan time.Time, 10) // queue up to 10 racers at a time, since we're storing the time they crossed, we don't have to display/process them right away
 	statusChan = make(chan int8, 1)
 	ready <- true
-	close(ready)
 	ticker := time.NewTicker(time.Second * 10)
 	results = make([]*Result, 0, 1024)
+	mutex.Unlock()
 	var err error
 	if useWiimote {
 		val, err := C.cwiid_set_err(C.getErrCallback())
@@ -529,10 +553,9 @@ func raceFunc(ready chan bool) {
 	for {
 	outer:
 		for {
-			// clear both channels
+			// clear the status channel for any previous errors
 			select {
 			case <-statusChan:
-			case <-racerChan:
 			default:
 				break outer
 			}
@@ -581,6 +604,7 @@ func raceFunc(ready chan bool) {
 					break loop // this takes us to the large loop above so that the wiimote can reconnect
 				}
 			case t := <-racerChan:
+				mutex.Lock()
 				if start == nil {
 					start = &t
 					ticker.Stop() // stop and "upgrade" the ticker for every second to track time
@@ -592,13 +616,15 @@ func raceFunc(ready chan bool) {
 					results = append(results, &Result{Place: uint(place + 1), Time: HumanDuration(t.Sub(*start))})
 					fmt.Printf("#%d - %s\n", results[place].Place, results[place].Time)
 				}
+				mutex.Unlock()
 			case now := <-ticker.C:
+				mutex.Lock()
 				if start != nil {
-					diff := HumanDuration(now.Sub(*start))
-					fmt.Println(diff)
+					fmt.Println(HumanDuration(now.Sub(*start)))
 				} else {
 					fmt.Println("Waiting to start the race")
 				}
+				mutex.Unlock()
 				// update the clock
 			}
 		}

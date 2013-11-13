@@ -152,7 +152,17 @@
 				<tbody>
 				{{range .Racers}}
 					<tr>
-						<td>{{.Place}}</td>
+						<td>
+							{{if $.Admin}}
+								<form class="form-inline" role="form" action="removeRacer" method="post">
+									<button type="submit" class="btn btn-danger btn-sm">X</button>
+									<input type="hidden" name="place" value="{{.Place}}">
+									{{.Place}}
+								</form>
+							{{else}}
+								{{.Place}}
+							{{end}}
+						</td>
 						<td>{{.Time}}</td>
 						<td>{{with .Entry}}{{.Bib}}{{end}}</td>
 						<td>{{with .Entry}}{{.Fname}}{{end}}</td>

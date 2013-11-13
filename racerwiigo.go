@@ -212,6 +212,9 @@ func uploadPrizes(w http.ResponseWriter, r *http.Request) {
 		prizes = append(prizes, &prize)
 	}
 	for _, result := range results {
+		if result.Entry == nil {
+			break // all done
+		}
 		calculatePrizes(result)
 	}
 	mutex.Unlock()
@@ -364,12 +367,57 @@ func linkBib(w http.ResponseWriter, r *http.Request) {
 }
 
 func showErrorForAdmin(w http.ResponseWriter, message string, args ...interface{}) {
+	w.WriteHeader(409) // conflict header, most likely due to old information in the client
 	msg := fmt.Sprintf(message, args...)
 	fmt.Println(msg)
+	if errorTemplate == nil {
+		fmt.Fprintf(w, msg)
+		return
+	}
 	err := errorTemplate.Execute(w, msg)
 	if err != nil {
 		fmt.Fprintf(w, "Error executing template - %s", err)
 	}
+}
+
+func removeRacer(w http.ResponseWriter, r *http.Request) {
+	place, err := strconv.Atoi(r.FormValue("place"))
+	if err != nil {
+		showErrorForAdmin(w, "Error %s getting place", err)
+		return
+	}
+	mutex.Lock()
+	if place <= len(results) && place > 0 {
+		newresults := make([]*Result, len(results)-1)
+		x := copy(newresults, results[:place-1]) + 1
+		for {
+			if x < len(results) {
+				results[x].Place = uint(x) // bump the place down one to its index
+				newresults[x-1] = results[x]
+				x++
+			} else {
+				break
+			}
+		}
+		results = newresults
+	} else {
+		showErrorForAdmin(w, "Could not remove runner in place %d", place)
+		mutex.Unlock()
+		return
+	}
+	// now need to recompute the prize results
+	for _, prize := range prizes {
+		prize.Winners = make([]*Result, 0)
+	}
+	for _, result := range results {
+		if result.Entry == nil {
+			break // all done
+		}
+		calculatePrizes(result)
+	}
+	mutex.Unlock()
+	http.Redirect(w, r, "/admin", 301)
+	return
 }
 
 func assignBib(w http.ResponseWriter, r *http.Request) {
@@ -518,6 +566,7 @@ func main() {
 	http.HandleFunc("raceresults/download", download)
 	http.HandleFunc("raceresults/uploadRacers", uploadRacers)
 	http.HandleFunc("raceresults/uploadPrizes", uploadPrizes)
+	http.HandleFunc("raceresults/removeRacer", removeRacer)
 	http.Handle("raceresults/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static/"))))
 	http.Handle("/", http.RedirectHandler("http://raceresults/", 307))
 	err = http.ListenAndServe(":80", nil)
@@ -536,6 +585,7 @@ func raceFunc(ready chan bool) {
 	var bdaddr C.bdaddr_t
 	var wm *C.struct_cwiid_wiimote_t
 	mutex.Lock()
+	start = nil
 	racerChan = make(chan time.Time, 10) // queue up to 10 racers at a time, since we're storing the time they crossed, we don't have to display/process them right away
 	statusChan = make(chan int8, 1)
 	ready <- true
@@ -593,7 +643,7 @@ func raceFunc(ready chan bool) {
 			case status := <-statusChan:
 				if status == Finished {
 					ticker.Stop()
-					fmt.Println("Race finished!")
+					ready <- false
 					// just stop listening for button presses on the wiimote, the race website can continue to run
 					return
 				} else if status == Disconnected {

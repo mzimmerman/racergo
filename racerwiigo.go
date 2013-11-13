@@ -23,6 +23,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -63,9 +64,10 @@ var unbibbedEntries map[int]*Entry // map of sequential Ids
 var results []*Result
 var raceResultsTemplate *template.Template
 var errorTemplate *template.Template
-var useWiimote = false
+var useWiimote = true
 var prizes []*Prize
 var mutex sync.Mutex
+var serverHandlers chan bool
 
 type HumanDuration time.Duration
 
@@ -454,40 +456,40 @@ func assignBib(w http.ResponseWriter, r *http.Request) {
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	mutex.Lock()
-	data := map[string]interface{}{"Racers": results}
-	if strings.HasSuffix(r.RequestURI, "admin") {
-		data["Admin"] = true
-		if len(unbibbedEntries) > 0 {
-			data["Unbibbed"] = unbibbedEntries
-			data["Optional"] = optionalEntryFields
-		}
-		for x := range results {
-			if results[x].Entry == nil {
-				data["Next"] = results[x].Place
-				break
+	<-serverHandlers // wait until a goroutine to handle http requests is free
+	done := make(chan bool)
+	go func(i chan bool) {
+		defer func() { i <- true }()
+		mutex.Lock()
+		data := map[string]interface{}{"Racers": results}
+		if strings.HasSuffix(r.RequestURI, "admin") {
+			data["Admin"] = true
+			if len(unbibbedEntries) > 0 {
+				data["Unbibbed"] = unbibbedEntries
+				data["Optional"] = optionalEntryFields
+			}
+			for x := range results {
+				if results[x].Entry == nil {
+					data["Next"] = results[x].Place
+					break
+				}
 			}
 		}
-	}
-	if start != nil {
-		diff := time.Since(*start)
-		data["Start"] = start.Format("3:04:05")
-		data["Time"] = HumanDuration(diff).Clock()
-		data["Seconds"] = fmt.Sprintf("%.0f", diff.Seconds())
-		data["NextUpdate"] = diff / time.Millisecond % 1000
-		data["Prizes"] = prizes
-	}
-	mutex.Unlock()
-	// TODO: take this code out once we're not changing the template on the fly anymore
-	raceResultsTemplate, err := template.ParseFiles("raceResults.template")
-	if err != nil {
-		fmt.Fprintf(w, "Error parsing template - %s", err)
-	} else {
-		err = raceResultsTemplate.Execute(w, data)
+		if start != nil {
+			diff := time.Since(*start)
+			data["Start"] = start.Format("3:04:05")
+			data["Time"] = HumanDuration(diff).Clock()
+			data["Seconds"] = fmt.Sprintf("%.0f", diff.Seconds())
+			data["NextUpdate"] = diff / time.Millisecond % 1000
+			data["Prizes"] = prizes
+		}
+		mutex.Unlock()
+		err := raceResultsTemplate.Execute(w, data)
 		if err != nil {
 			fmt.Fprintf(w, "Error executing template - %s", err)
 		}
-	}
+	}(done)
+	serverHandlers <- <-done // wait for handler to finish, then put it back in the queue so another goroutine can spawn
 }
 
 func uploadFile(filename string) (*http.Request, error) {
@@ -523,6 +525,16 @@ func uploadFile(filename string) (*http.Request, error) {
 }
 
 func main() {
+	numHandlers := runtime.NumCPU()
+	runtime.GOMAXPROCS(numHandlers)
+	if numHandlers >= 2 {
+		// want to leave one cpu not handling racer http requests so as to handle the wiimote quickly
+		numHandlers--
+	}
+	serverHandlers = make(chan bool, numHandlers)
+	for x := 0; x < numHandlers; x++ {
+		serverHandlers <- true // fill the channel with valid goroutines
+	}
 	var err error
 	raceResultsTemplate, err = template.ParseFiles("raceResults.template")
 	if err != nil {

@@ -1,38 +1,20 @@
 {"Title":"Men's Overall", "LowAge":0, "HighAge":100,"Gender":"M","Amount":1,"WinAgain":false}
 {"Title":"Women's Overall", "LowAge":0, "HighAge":100,"Gender":"F","Amount":1,"WinAgain":false}
 
-{"Title":"Boy's Under 10", "LowAge":0, "HighAge":10,"Gender":"M","Amount":2,"WinAgain":false}
-{"Title":"Girl's Under 10", "LowAge":0, "HighAge":10,"Gender":"F","Amount":2,"WinAgain":false}
+{"Title":"Men's' U20", "LowAge":0, "HighAge":19,"Gender":"M","Amount":3,"WinAgain":false}
+{"Title":"Women's U20", "LowAge":0, "HighAge":19,"Gender":"F","Amount":3,"WinAgain":false}
 
-{"Title":"Boy's 11-15", "LowAge":11, "HighAge":15,"Gender":"M","Amount":2,"WinAgain":false}
-{"Title":"Girl's 11-15", "LowAge":11, "HighAge":15,"Gender":"F","Amount":2,"WinAgain":false}
+{"Title":"Men's 20s", "LowAge":20, "HighAge":29,"Gender":"M","Amount":3,"WinAgain":false}
+{"Title":"Women's 20s", "LowAge":20, "HighAge":29,"Gender":"F","Amount":3,"WinAgain":false}
 
-{"Title":"Boy's 16-20", "LowAge":16, "HighAge":20,"Gender":"M","Amount":2,"WinAgain":false}
-{"Title":"Girl's 16-20", "LowAge":16, "HighAge":20,"Gender":"F","Amount":2,"WinAgain":false}
+{"Title":"Men's 30s", "LowAge":30, "HighAge":39,"Gender":"M","Amount":3,"WinAgain":false}
+{"Title":"Women's 30s", "LowAge":30, "HighAge":39,"Gender":"F","Amount":3,"WinAgain":false}
 
-{"Title":"Men's 21-25", "LowAge":21, "HighAge":25,"Gender":"M","Amount":2,"WinAgain":false}
-{"Title":"Women's 21-25", "LowAge":21, "HighAge":25,"Gender":"F","Amount":2,"WinAgain":false}
+{"Title":"Men's 40s", "LowAge":40, "HighAge":49,"Gender":"M","Amount":3,"WinAgain":false}
+{"Title":"Women's 40s", "LowAge":40, "HighAge":49,"Gender":"F","Amount":3,"WinAgain":false}
 
-{"Title":"Men's 26-30", "LowAge":26, "HighAge":30,"Gender":"M","Amount":2,"WinAgain":false}
-{"Title":"Women's 26-30", "LowAge":26, "HighAge":30,"Gender":"F","Amount":2,"WinAgain":false}
+{"Title":"Men's 50s", "LowAge":50, "HighAge":59,"Gender":"M","Amount":3,"WinAgain":false}
+{"Title":"Women's 50s", "LowAge":50, "HighAge":59,"Gender":"F","Amount":3,"WinAgain":false}
 
-{"Title":"Men's 31-35", "LowAge":31, "HighAge":35,"Gender":"M","Amount":2,"WinAgain":false}
-{"Title":"Women's 31-35", "LowAge":31, "HighAge":35,"Gender":"F","Amount":2,"WinAgain":false}
-
-{"Title":"Men's 36-40", "LowAge":36, "HighAge":40,"Gender":"M","Amount":2,"WinAgain":false}
-{"Title":"Women's 36-40", "LowAge":36, "HighAge":40,"Gender":"F","Amount":2,"WinAgain":false}
-
-{"Title":"Men's 41-45", "LowAge":41, "HighAge":45,"Gender":"M","Amount":2,"WinAgain":false}
-{"Title":"Women's 41-45", "LowAge":41, "HighAge":45,"Gender":"F","Amount":2,"WinAgain":false}
-
-{"Title":"Men's 46-50", "LowAge":46, "HighAge":50,"Gender":"M","Amount":2,"WinAgain":false}
-{"Title":"Women's 46-50", "LowAge":46, "HighAge":50,"Gender":"F","Amount":2,"WinAgain":false}
-
-{"Title":"Men's 51-55", "LowAge":51, "HighAge":55,"Gender":"M","Amount":2,"WinAgain":false}
-{"Title":"Women's 51-55", "LowAge":51, "HighAge":55,"Gender":"F","Amount":2,"WinAgain":false}
-
-{"Title":"Men's 56-60", "LowAge":56, "HighAge":60,"Gender":"M","Amount":2,"WinAgain":false}
-{"Title":"Women's 56-60", "LowAge":56, "HighAge":60,"Gender":"F","Amount":2,"WinAgain":false}
-
-{"Title":"Men's 61+", "LowAge":61, "HighAge":100,"Gender":"M","Amount":2,"WinAgain":false}
-{"Title":"Women's 61+", "LowAge":61, "HighAge":100,"Gender":"F","Amount":2,"WinAgain":false}
+{"Title":"Men's 60+", "LowAge":60, "HighAge":100,"Gender":"M","Amount":3,"WinAgain":false}
+{"Title":"Women's 60+", "LowAge":60, "HighAge":100,"Gender":"F","Amount":3,"WinAgain":false}

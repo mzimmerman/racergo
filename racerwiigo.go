@@ -64,7 +64,8 @@ var unbibbedEntries map[int]*Entry // map of sequential Ids
 var results []*Result
 var raceResultsTemplate *template.Template
 var errorTemplate *template.Template
-var useWiimote = true
+var useWiimote = false
+var wiimoteConnected = false
 var prizes []*Prize
 var mutex sync.Mutex
 var serverHandlers chan bool
@@ -139,7 +140,7 @@ func goCwiidCallback(wm unsafe.Pointer, a int, mesg *C.struct_cwiid_btn_mesg, tp
 
 //export goErrCallback
 func goErrCallback(wm unsafe.Pointer, char *C.char, ap unsafe.Pointer) {
-	//func goErrCallback(wm *C.cwiid_wiimote_t, char *C.char, ap C.va_list) {s
+	//func goErrCallback(wm *C.cwiid_wiimote_t, char *C.char, ap C.va_list) {
 	str := C.GoString(char)
 	switch str {
 	case "No Bluetooth interface found":
@@ -455,6 +456,45 @@ func assignBib(w http.ResponseWriter, r *http.Request) {
 	return
 }
 
+func addEntry(w http.ResponseWriter, r *http.Request) {
+	entry := &Entry{}
+	age, err := strconv.Atoi(r.FormValue("Age"))
+	if age < 0 {
+		showErrorForAdmin(w, "Not a valid age, must be >= 0")
+		return
+	}
+	if err != nil {
+		showErrorForAdmin(w, "Error %s getting Age", err)
+		return
+	}
+	entry.Age = uint(age)
+	entry.Bib, err = strconv.Atoi(r.FormValue("Bib"))
+	if entry.Bib < 0 {
+		showErrorForAdmin(w, "Not a valid bib, must be >= 0")
+		return
+	}
+	if err != nil {
+		showErrorForAdmin(w, "Error %s getting Bib", err)
+		return
+	}
+	entry.Fname = r.FormValue("Fname")
+	entry.Lname = r.FormValue("Lname")
+	entry.Male = r.FormValue("Male") == "true"
+	entry.Optional = make([]string, 0)
+	mutex.Lock()
+	for _, s := range optionalEntryFields {
+		entry.Optional = append(entry.Optional, r.FormValue(s))
+	}
+	if bibbedEntries == nil {
+		bibbedEntries = make(map[int]*Entry)
+	}
+	bibbedEntries[entry.Bib] = entry
+	fmt.Printf("Added Entry - %#v\n", entry)
+	mutex.Unlock()
+	http.Redirect(w, r, "/admin", 301)
+	return
+}
+
 func handler(w http.ResponseWriter, r *http.Request) {
 	<-serverHandlers // wait until a goroutine to handle http requests is free
 	done := make(chan bool)
@@ -474,6 +514,8 @@ func handler(w http.ResponseWriter, r *http.Request) {
 					break
 				}
 			}
+			data["WiimoteConnected"] = wiimoteConnected
+			data["Fields"] = optionalEntryFields
 		}
 		if start != nil {
 			diff := time.Since(*start)
@@ -484,6 +526,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			data["Prizes"] = prizes
 		}
 		mutex.Unlock()
+		raceResultsTemplate, _ = template.ParseFiles("raceResults.template")
 		err := raceResultsTemplate.Execute(w, data)
 		if err != nil {
 			fmt.Fprintf(w, "Error executing template - %s", err)
@@ -575,6 +618,7 @@ func main() {
 	http.HandleFunc("raceresults/admin", handler)
 	http.HandleFunc("raceresults/linkBib", linkBib)
 	http.HandleFunc("raceresults/assignBib", assignBib)
+	http.HandleFunc("raceresults/addEntry", addEntry)
 	http.HandleFunc("raceresults/download", download)
 	http.HandleFunc("raceresults/uploadRacers", uploadRacers)
 	http.HandleFunc("raceresults/uploadPrizes", uploadPrizes)
@@ -649,6 +693,9 @@ func raceFunc(ready chan bool) {
 				fmt.Errorf("Err = %v", err)
 			}
 		}
+		mutex.Lock()
+		wiimoteConnected = true // it may be that useWiimote = false, in that case, we still want to "fake" that the wiimote is connected
+		mutex.Unlock()
 	loop:
 		for {
 			select {
@@ -657,12 +704,19 @@ func raceFunc(ready chan bool) {
 					ticker.Stop()
 					ready <- false
 					// just stop listening for button presses on the wiimote, the race website can continue to run
+					// leave the WiimoteConnected status as it's only for display in the web interface
 					return
 				} else if status == Disconnected {
 					fmt.Println("Wiimote lost connection")
+					mutex.Lock()
+					wiimoteConnected = false
+					mutex.Unlock()
 					break loop // this takes us to the large loop above so that the wiimote can reconnect
 				} else if status == Error {
 					fmt.Println("An error occurred when communicating with the wiimote")
+					mutex.Lock()
+					wiimoteConnected = false
+					mutex.Unlock()
 					break loop // this takes us to the large loop above so that the wiimote can reconnect
 				}
 			case t := <-racerChan:

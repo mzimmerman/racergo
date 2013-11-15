@@ -4,7 +4,7 @@
 		<title>Race Results</title>
 		<meta name="viewport" content="width=device-width, initial-scale=1.0">
 		<link rel="stylesheet" media="screen" href="/static/bootstrap.min.css">
-		{{if not .Next}}
+		{{if not .Admin}}
 			<meta http-equiv="refresh" content="30">
 		{{end}}
 		{{if .Start}}
@@ -34,6 +34,11 @@
 	<body>
 		<div class="row">
 			{{if .Admin}}
+				{{if not .WiimoteConnected}}
+					<div class="container">
+						<div class="alert alert-danger"><h1>Wiimote Disconnected!</h1></div>
+					</div>
+				{{end}}
 				<div class="col-md-6">
 					{{if .Next}}
 						<form class="form-inline" role="form" action="linkBib" method="post">
@@ -62,6 +67,34 @@
 						</div>
 						<button class="btn btn-default" type="submit">Upload Prizes</button>
 					</form>
+					<form class="inline-form" role="form" action="addEntry" method="post">
+						<div class="form-group col-lg-2">
+							<input class="form-control " type="text" name="Fname" placeholder="First">
+						</div>
+						<div class="form-group col-lg-2">
+							<input class="form-control " type="text" name="Lname" placeholder="Last">
+						</div>
+						<div class="form-group col-lg-2">
+							<input class="form-control " type="number" name="Age" placeholder="Age">
+						</div>
+						<div class="form-group col-lg-2">
+							<input class="form-control " type="number" name="Bib" placeholder="Bib">
+						</div>
+						<div class="form-group col-lg-2">
+							<label class="radio-inline">
+								<input type="radio" name="Male" value="true">Male
+							</label>
+							<label class="radio-inline">
+								<input type="radio" name="Male" value="false">Female
+							</label>
+						</div>
+						{{range .Fields}}
+							<div class="form-group col-lg-2">
+								<input class="form-control " type="text" name="{{.}}" placeholder="{{.}}">
+							</div>
+						{{end}}
+						<button class="btn btn-default" type="submit">Add Entry</button>
+					</form>
 					<a class="btn btn-default" href="/download">Download Results</a>
 				</div>
 				<div class="col-md-6">
@@ -75,10 +108,10 @@
 					{{else}}
 						<h1 class="text-center">00:00:00</h1>
 					{{end}}
-					{{if not .Next}}
+					{{if not .Admin}}
 						<p class="text-center">Race status will auto-refresh every 30 seconds</p>
 					{{else}}
-						<p class="text-center">Race status auto-refresh disabled so as to not disrupt bib input</p>
+						<p class="text-center">Race status auto-refresh disabled, need to refresh manually or submit data</p>
 					{{end}}
 				</div>
 			</div>
@@ -127,12 +160,12 @@
 		<div class="container">
 			{{range .Prizes}}
 				{{if .Winners}}
-					<div class="col-md-2">
+					<div class="col-md-4">
 						<div class="panel panel-primary">
 							<div class="panel-heading">{{.Title}}</div>
 							<div class="panel-body">
 								{{range .Winners}}
-									<p>{{.Entry.Fname}} {{.Entry.Lname}}<span class="badge badge-success pull-right">{{.Time.String}}</span></p>
+									<p>{{.Entry.Fname}} {{.Entry.Lname}}<span class="pull-right">{{.Time.String}}</span></p>
 								{{end}}
 							</div>
 						</div>

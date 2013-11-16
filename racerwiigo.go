@@ -514,6 +514,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 					break
 				}
 			}
+			if _, ok := data["Next"]; !ok {
+				data["Next"] = len(results) + 1
+			}
 			data["WiimoteConnected"] = wiimoteConnected
 			data["Fields"] = optionalEntryFields
 		}

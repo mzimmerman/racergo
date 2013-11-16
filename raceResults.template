@@ -40,19 +40,17 @@
 					</div>
 				{{end}}
 				<div class="col-md-6">
-					{{if .Next}}
-						<form class="form-inline" role="form" action="linkBib" method="post">
-							<div class="form-group">
-								<label class="sr-only" for="next">Overall Place #</label>
-								<input class="form-control" type="number" name="next" id="next" required="required" placeholder="Overall Place #" value="{{.Next}}">
-							</div>
-							<div class="form-group">
-								<label class="sr-only" for="bib">Bib #</label>
-								<input class="form-control" type="number" name="bib" id="bib" required="required" placeholder="Bib#" autofocus>
-							</div>
-							<button class="btn btn-default" type="submit">Link</button>
-						</form>
-					{{end}}
+					<form class="form-inline" role="form" action="linkBib" method="post">
+						<div class="form-group">
+							<label class="sr-only" for="next">Overall Place #</label>
+							<input class="form-control" type="number" name="next" id="next" required="required" placeholder="Overall Place #" value="{{.Next}}">
+						</div>
+						<div class="form-group">
+							<label class="sr-only" for="bib">Bib #</label>
+							<input class="form-control" type="number" name="bib" id="bib" required="required" placeholder="Bib#" autofocus>
+						</div>
+						<button class="btn btn-default" type="submit">Link</button>
+					</form>
 					<form class="form-inline" role="form" action="uploadRacers" method="post" enctype="multipart/form-data">
 						<div class="form-group">
 							<label class="sr-only" for="entriesUpload">Upload Registrants CSV</label>
@@ -130,7 +128,6 @@
 						{{end}}
 					</tr>
 					<tbody>
-					{{$autofocus := 1}}
 					{{range $id , $unbibbed := .Unbibbed}}
 						<tr>
 							<td>

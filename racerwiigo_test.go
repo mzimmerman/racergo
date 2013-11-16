@@ -84,7 +84,7 @@ func (t *testSuite) TestLoadRacers() {
 func (t *testSuite) TestRemoveRacer() {
 	defer stopRace(startRace())
 	// race is started, load the racers
-	req, err := uploadFile("prizes.json")
+	req, err := uploadFile("test_prizes.json")
 	t.Nil(err)
 	t.Not(t.Nil(req))
 	w := httptest.NewRecorder()

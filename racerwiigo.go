@@ -333,8 +333,12 @@ func uploadRacers(w http.ResponseWriter, r *http.Request) {
 func linkBib(w http.ResponseWriter, r *http.Request) {
 	err := r.ParseForm()
 	next, err := strconv.Atoi(r.Form.Get("next"))
-	if err != nil || next > len(results) {
+	if err != nil {
 		showErrorForAdmin(w, "Error %s getting next", err)
+		return
+	}
+	if next > len(results) {
+		showErrorForAdmin(w, "Overall place runner #%d has not crossed the finish line yet", next)
 		return
 	}
 	bib, err := strconv.Atoi(r.Form.Get("bib"))
@@ -350,10 +354,21 @@ func linkBib(w http.ResponseWriter, r *http.Request) {
 				mutex.Unlock()
 				return
 			}
+			recalculateAll := results[next-1].Entry != nil
+			// remove the old association if there was any
+			if recalculateAll {
+				bibbedEntries[results[next-1].Entry.Bib].Result = nil
+				results[next-1].Entry = nil
+			}
+			// make the new association
 			results[next-1].Entry = bibbedEntries[bib]
 			bibbedEntries[bib].Result = results[next-1]
 			fmt.Printf("Set bib for place %d to %d\n", next, bib)
-			calculatePrizes(results[next-1])
+			if recalculateAll {
+				recomputeAllPrizes()
+			} else {
+				calculatePrizes(results[next-1])
+			}
 		} else {
 			showErrorForAdmin(w, "Bib number %d was not assigned to anyone.", bib)
 			mutex.Unlock()
@@ -408,6 +423,14 @@ func removeRacer(w http.ResponseWriter, r *http.Request) {
 		mutex.Unlock()
 		return
 	}
+	recomputeAllPrizes()
+	mutex.Unlock()
+	http.Redirect(w, r, "/admin", 301)
+	return
+}
+
+// mutex should be locked already when calling this
+func recomputeAllPrizes() {
 	// now need to recompute the prize results
 	for _, prize := range prizes {
 		prize.Winners = make([]*Result, 0)
@@ -418,9 +441,6 @@ func removeRacer(w http.ResponseWriter, r *http.Request) {
 		}
 		calculatePrizes(result)
 	}
-	mutex.Unlock()
-	http.Redirect(w, r, "/admin", 301)
-	return
 }
 
 func assignBib(w http.ResponseWriter, r *http.Request) {

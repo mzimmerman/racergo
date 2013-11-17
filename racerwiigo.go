@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"reflect"
 	"runtime"
 	"strconv"
@@ -671,7 +672,6 @@ func raceFunc(ready chan bool) {
 	ticker := time.NewTicker(time.Second * 10)
 	results = make([]*Result, 0, 1024)
 	mutex.Unlock()
-	var err error
 	if useWiimote {
 		val, err := C.cwiid_set_err(C.getErrCallback())
 		if val != 0 || err != nil {
@@ -688,6 +688,10 @@ func raceFunc(ready chan bool) {
 			default:
 				break outer
 			}
+		}
+		err := exec.Command("aplay", "test.wav").Run()
+		if err != nil {
+			fmt.Printf("Could not play sound - %v\n", err)
 		}
 		if useWiimote {
 			fmt.Println("Press 1&2 on the Wiimote now")
@@ -727,7 +731,7 @@ func raceFunc(ready chan bool) {
 					ticker.Stop()
 					ready <- false
 					// just stop listening for button presses on the wiimote, the race website can continue to run
-					// leave the WiimoteConnected status as it's only for display in the web interface
+					// leave the WiimoteConnected status as it's only for alerting the race admins if the Wiimote loses connection
 					return
 				} else if status == Disconnected {
 					fmt.Println("Wiimote lost connection")

@@ -747,6 +747,11 @@ func raceFunc(ready chan bool) {
 					break loop // this takes us to the large loop above so that the wiimote can reconnect
 				}
 			case t := <-racerChan:
+				// play sound every time that the A button is handled from the Wiimote
+				err := exec.Command("aplay", "test.wav").Run()
+				if err != nil {
+					fmt.Printf("Could not play sound - %v\n", err)
+				}
 				mutex.Lock()
 				if start == nil {
 					start = &t

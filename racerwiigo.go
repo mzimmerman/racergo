@@ -673,7 +673,7 @@ func raceFunc(ready chan bool) {
 	mutex.Unlock()
 	tty, err := os.OpenFile("/dev/tty0", os.O_RDWR, 0)
 	if err != nil {
-		fmt.Printf("Error playing sound! - %v", err)
+		fmt.Printf("Error playing sound! - %v\n", err)
 	} else {
 		defer tty.Close()
 	}

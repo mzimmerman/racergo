@@ -22,7 +22,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"reflect"
 	"runtime"
 	"strconv"
@@ -65,7 +64,7 @@ var unbibbedEntries map[int]*Entry // map of sequential Ids
 var results []*Result
 var raceResultsTemplate *template.Template
 var errorTemplate *template.Template
-var useWiimote = false
+var useWiimote = true
 var wiimoteConnected = false
 var prizes []*Prize
 var mutex sync.Mutex
@@ -672,6 +671,12 @@ func raceFunc(ready chan bool) {
 	ticker := time.NewTicker(time.Second * 10)
 	results = make([]*Result, 0, 1024)
 	mutex.Unlock()
+	tty, err := os.OpenFile("/dev/tty0", os.O_RDWR, 0)
+	if err != nil {
+		fmt.Printf("Error playing sound! - %v", err)
+	} else {
+		defer tty.Close()
+	}
 	if useWiimote {
 		val, err := C.cwiid_set_err(C.getErrCallback())
 		if val != 0 || err != nil {
@@ -689,9 +694,8 @@ func raceFunc(ready chan bool) {
 				break outer
 			}
 		}
-		err := exec.Command("aplay", "test.wav").Run()
-		if err != nil {
-			fmt.Printf("Could not play sound - %v\n", err)
+		if tty != nil {
+			fmt.Fprintf(tty, "\x07")
 		}
 		if useWiimote {
 			fmt.Println("Press 1&2 on the Wiimote now")
@@ -748,9 +752,8 @@ func raceFunc(ready chan bool) {
 				}
 			case t := <-racerChan:
 				// play sound every time that the A button is handled from the Wiimote
-				err := exec.Command("aplay", "test.wav").Run()
-				if err != nil {
-					fmt.Printf("Could not play sound - %v\n", err)
+				if tty != nil {
+					fmt.Fprintf(tty, "\x07")
 				}
 				mutex.Lock()
 				if start == nil {

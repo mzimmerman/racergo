@@ -516,46 +516,42 @@ func addEntry(w http.ResponseWriter, r *http.Request) {
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
+	mutex.Lock()
+	data := map[string]interface{}{"Racers": results}
+	if strings.HasSuffix(r.RequestURI, "admin") {
+		data["Admin"] = true
+		if len(unbibbedEntries) > 0 {
+			data["Unbibbed"] = unbibbedEntries
+			data["Optional"] = optionalEntryFields
+		}
+		for x := range results {
+			if results[x].Entry == nil {
+				data["Next"] = results[x].Place
+				break
+			}
+		}
+		if _, ok := data["Next"]; !ok {
+			data["Next"] = len(results) + 1
+		}
+		data["WiimoteConnected"] = wiimoteConnected
+		data["Fields"] = optionalEntryFields
+	}
+	if start != nil {
+		diff := time.Since(*start)
+		data["Start"] = start.Format("3:04:05")
+		data["Time"] = HumanDuration(diff).Clock()
+		data["Seconds"] = fmt.Sprintf("%.0f", diff.Seconds())
+		data["NextUpdate"] = diff / time.Millisecond % 1000
+		data["Prizes"] = prizes
+	}
+	mutex.Unlock()
 	<-serverHandlers // wait until a goroutine to handle http requests is free
-	done := make(chan bool)
-	go func(i chan bool) {
-		defer func() { i <- true }()
-		mutex.Lock()
-		data := map[string]interface{}{"Racers": results}
-		if strings.HasSuffix(r.RequestURI, "admin") {
-			data["Admin"] = true
-			if len(unbibbedEntries) > 0 {
-				data["Unbibbed"] = unbibbedEntries
-				data["Optional"] = optionalEntryFields
-			}
-			for x := range results {
-				if results[x].Entry == nil {
-					data["Next"] = results[x].Place
-					break
-				}
-			}
-			if _, ok := data["Next"]; !ok {
-				data["Next"] = len(results) + 1
-			}
-			data["WiimoteConnected"] = wiimoteConnected
-			data["Fields"] = optionalEntryFields
-		}
-		if start != nil {
-			diff := time.Since(*start)
-			data["Start"] = start.Format("3:04:05")
-			data["Time"] = HumanDuration(diff).Clock()
-			data["Seconds"] = fmt.Sprintf("%.0f", diff.Seconds())
-			data["NextUpdate"] = diff / time.Millisecond % 1000
-			data["Prizes"] = prizes
-		}
-		mutex.Unlock()
-		raceResultsTemplate, _ = template.ParseFiles("raceResults.template")
-		err := raceResultsTemplate.Execute(w, data)
-		if err != nil {
-			fmt.Fprintf(w, "Error executing template - %s", err)
-		}
-	}(done)
-	serverHandlers <- <-done // wait for handler to finish, then put it back in the queue so another goroutine can spawn
+	raceResultsTemplate, _ = template.ParseFiles("raceResults.template")
+	err := raceResultsTemplate.Execute(w, data)
+	if err != nil {
+		fmt.Fprintf(w, "Error executing template - %s", err)
+	}
+	serverHandlers <- true // wait for handler to finish, then put it back in the queue so another goroutine can spawn
 }
 
 func uploadFile(filename string) (*http.Request, error) {

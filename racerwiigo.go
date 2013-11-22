@@ -1,8 +1,7 @@
 package main
 
 /*
-#cgo CFLAGS: -I/usr/include
-#cgo LDFLAGS: -lcwiid -Lcwiid/libcwiid/libcwiid.a
+#cgo pkg-config: /usr/lib/pkgconfig/cwiid.pc
 #include "racerwiigo.h"
 #include <stdlib.h>
 #include <cwiid.h>
@@ -700,11 +699,13 @@ func raceFunc(ready chan bool) {
 				fmt.Errorf("cwiid_open: %v\n", err)
 				continue
 			}
+			if wm == nil {
+				continue // could not connect to wiimote
+			}
 			res, err := C.cwiid_command(wm, C.CWIID_CMD_RPT_MODE, C.CWIID_RPT_BTN)
 			if res != 0 || err != nil {
 				fmt.Printf("Result of command = %d - %v\n", res, err)
 			}
-
 			res, err = C.cwiid_set_mesg_callback(wm, C.getCwiidCallback())
 			if res != 0 || err != nil {
 				fmt.Printf("Result of callback = %d - %v\n", res, err)
@@ -713,7 +714,6 @@ func raceFunc(ready chan bool) {
 			if res != 0 || err != nil {
 				fmt.Printf("Result of enable = %d - %v\n", res, err)
 			}
-
 			res, err = C.cwiid_set_led(wm, C.CWIID_LED4_ON)
 			if res != 0 || err != nil {
 				fmt.Printf("Set led result = %d\n", res)
@@ -737,12 +737,14 @@ func raceFunc(ready chan bool) {
 					fmt.Println("Wiimote lost connection")
 					mutex.Lock()
 					wiimoteConnected = false
+					wm = nil
 					mutex.Unlock()
 					break loop // this takes us to the large loop above so that the wiimote can reconnect
 				} else if status == Error {
 					fmt.Println("An error occurred when communicating with the wiimote")
 					mutex.Lock()
 					wiimoteConnected = false
+					wm = nil
 					mutex.Unlock()
 					break loop // this takes us to the large loop above so that the wiimote can reconnect
 				}

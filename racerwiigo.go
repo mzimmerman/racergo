@@ -1,7 +1,8 @@
 package main
 
 /*
-#cgo pkg-config: /usr/lib/pkgconfig/cwiid.pc
+#cgo CFLAGS: -I/usr/include
+#cgo LDFLAGS: -lcwiid
 #include "racerwiigo.h"
 #include <stdlib.h>
 #include <cwiid.h>

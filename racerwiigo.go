@@ -31,13 +31,13 @@ import (
 	"unsafe"
 )
 
-var buttons = []_Ctype_uint16_t{ // only HOME and A buttons are used for this program
+var buttons = []_Ctype_uint16_t{ // only the A button is used for this program
 	C.CWIID_BTN_A,
 	//C.CWIID_BTN_B,
 	//C.CWIID_BTN_1,
 	//C.CWIID_BTN_2,
 	//C.CWIID_BTN_MINUS,
-	C.CWIID_BTN_HOME,
+	//C.CWIID_BTN_HOME,
 	//C.CWIID_BTN_LEFT,
 	//C.CWIID_BTN_RIGHT,
 	//C.CWIID_BTN_DOWN,
@@ -126,8 +126,8 @@ func goCwiidCallback(wm unsafe.Pointer, a int, mesg *C.struct_cwiid_btn_mesg, tp
 				if !buttonStatus[x] {
 					if button == C.CWIID_BTN_A {
 						racerChan <- time.Now()
-					} else if button == C.CWIID_BTN_HOME {
-						statusChan <- Finished
+						//} else if button == C.CWIID_BTN_HOME {
+						//	statusChan <- Finished
 					}
 					buttonStatus[x] = true
 				}

@@ -168,18 +168,26 @@ func download(w http.ResponseWriter, r *http.Request) {
 		length = len(results)
 	}
 	csvData := make([][]string, 0, length+1)
-	headerRow := append([]string{"Fname", "Lname", "Age", "Bib", "Overall Place", "Time"}, optionalEntryFields...)
+	headerRow := append([]string{"Fname", "Lname", "Age", "Gender", "Bib", "Overall Place", "Time"}, optionalEntryFields...)
 	blank := make([]string, len(optionalEntryFields))
 	csvData = append(csvData, headerRow)
 	for _, result := range results {
 		if result.Entry == nil {
-			csvData = append(csvData, append([]string{"", "", "", "", strconv.Itoa(int(result.Place)), result.Time.String()}, blank...))
+			csvData = append(csvData, append([]string{"", "", "", "", "", strconv.Itoa(int(result.Place)), result.Time.String()}, blank...))
 		} else {
-			csvData = append(csvData, append([]string{result.Entry.Fname, result.Entry.Lname, strconv.Itoa(int(result.Entry.Age)), strconv.Itoa(int(result.Entry.Bib)), strconv.Itoa(int(result.Place)), result.Time.String()}, result.Entry.Optional...))
+			gender := "F"
+			if result.Entry.Male {
+				gender = "M"
+			}
+			csvData = append(csvData, append([]string{result.Entry.Fname, result.Entry.Lname, strconv.Itoa(int(result.Entry.Age)), gender, strconv.Itoa(int(result.Entry.Bib)), strconv.Itoa(int(result.Place)), result.Time.String()}, result.Entry.Optional...))
 		}
 	}
 	for _, entry := range unbibbedEntries {
-		csvData = append(csvData, append([]string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), "", "", ""}, entry.Optional...))
+		gender := "F"
+		if entry.Male {
+			gender = "M"
+		}
+		csvData = append(csvData, append([]string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), gender, "", "", ""}, entry.Optional...))
 	}
 	mutex.Unlock()
 	writer := csv.NewWriter(w)

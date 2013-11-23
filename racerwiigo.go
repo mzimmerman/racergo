@@ -341,6 +341,10 @@ func linkBib(w http.ResponseWriter, r *http.Request) {
 		showErrorForAdmin(w, "Overall place runner #%d has not crossed the finish line yet", next)
 		return
 	}
+	if next == 0 {
+		showErrorForAdmin(w, "Can't assign bib for place 0, we start at place 1")
+		return
+	}
 	bib, err := strconv.Atoi(r.Form.Get("bib"))
 	if bib < 0 {
 		showErrorForAdmin(w, "Cannot assign a negative bib number of %d", bib)

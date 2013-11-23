@@ -539,6 +539,11 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		}
 		data["WiimoteConnected"] = wiimoteConnected
 		data["Fields"] = optionalEntryFields
+		end := len(results) - 5
+		if end < 0 {
+			end = 0
+		}
+		data["RecentRacers"] = results[end:]
 	}
 	if start != nil {
 		diff := time.Since(*start)

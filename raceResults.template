@@ -39,6 +39,38 @@
 						<div class="alert alert-danger"><h1>Wiimote Disconnected!</h1></div>
 					</div>
 				{{end}}
+				<div class="container">
+					<table class="table table-bordered table-condensed table-striped">
+						<tr>
+							<th>Overall Place</th>
+							<th>Time</th>
+							<th>Bib #</th>
+							<th>First</th>
+							<th>Last</th>
+						</tr>
+						<tbody>
+						{{range .RecentRacers}}
+							<tr>
+								<td>
+									{{if $.Admin}}
+										<form class="form-inline" role="form" action="removeRacer" method="post">
+											<button type="submit" class="btn btn-danger btn-sm">X</button>
+											<input type="hidden" name="place" value="{{.Place}}">
+											{{.Place}}
+										</form>
+									{{else}}
+										{{.Place}}
+									{{end}}
+								</td>
+								<td>{{.Time}}</td>
+								<td>{{with .Entry}}{{.Bib}}{{end}}</td>
+								<td>{{with .Entry}}{{.Fname}}{{end}}</td>
+								<td>{{with .Entry}}{{.Lname}}{{end}}</td>
+							</tr>
+						{{end}}
+						</tbody>
+					</table>
+				</div>
 				<div class="col-md-6">
 					<form class="form-inline" role="form" action="linkBib" method="post">
 						<div class="form-group">

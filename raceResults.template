@@ -186,22 +186,24 @@
 				</table>
 			</div>
 		{{end}}
-		<div class="container">
-			{{range .Prizes}}
-				{{if .Winners}}
-					<div class="col-md-4">
-						<div class="panel panel-primary">
-							<div class="panel-heading">{{.Title}}</div>
-							<div class="panel-body">
-								{{range .Winners}}
-									<p>{{.Entry.Fname}} {{.Entry.Lname}}<span class="pull-right">{{.Time.String}}</span></p>
-								{{end}}
+		{{if not .Admin}}
+			<div class="container">
+				{{range .Prizes}}
+					{{if .Winners}}
+						<div class="col-md-4">
+							<div class="panel panel-primary">
+								<div class="panel-heading">{{.Title}}</div>
+								<div class="panel-body">
+									{{range .Winners}}
+										<p>{{.Entry.Fname}} {{.Entry.Lname}}<span class="pull-right">{{.Time.String}}</span></p>
+									{{end}}
+								</div>
 							</div>
 						</div>
-					</div>
+					{{end}}
 				{{end}}
-			{{end}}
-		</div>
+			</div>
+		{{end}}
 		<div class="container">
 			<table class="table table-bordered table-condensed table-striped">
 				<tr>

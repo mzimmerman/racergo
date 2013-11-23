@@ -539,7 +539,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		}
 		data["WiimoteConnected"] = wiimoteConnected
 		data["Fields"] = optionalEntryFields
-		end := len(results) - 5
+		end := len(results) - 10
 		if end < 0 {
 			end = 0
 		}

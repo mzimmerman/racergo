@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/remogatto/prettytest"
+
 	"net/http"
 	"net/http/httptest"
 	"runtime"
@@ -57,6 +58,8 @@ func (t *testSuite) TestLoadRacers() {
 	mutex.Lock()
 	t.Equal(len(bibbedEntries), 8)
 	t.Equal(len(unbibbedEntries), 0)
+	t.Equal("G", bibbedEntries[4].Fname)
+	t.Equal("H", bibbedEntries[4].Lname)
 	mutex.Unlock()
 
 	req, err = uploadFile("test_runners2.csv")
@@ -145,6 +148,71 @@ func (t *testSuite) TestRemoveRacer() {
 		mutex.Lock()
 		t.Equal(len(results), x.length)
 		mutex.Unlock()
+	}
+}
+
+func (t *testSuite) TestLink() {
+	defer stopRace(startRace())
+	// race is started, load the racers
+	req, err := uploadFile("test_runners.csv")
+	t.Nil(err)
+	t.Not(t.Nil(req))
+	w := httptest.NewRecorder()
+	uploadRacers(w, req)
+	t.Equal(w.Code, 301)
+	now := time.Now()
+	mutex.Lock()
+	for x := 0; x < len(bibbedEntries); x++ {
+		now = now.Add(time.Second)
+		racerChan <- now // have everyone cross the line with different times
+	}
+	mutex.Unlock()
+	for {
+		mutex.Lock()
+		if len(results) >= len(bibbedEntries) {
+			mutex.Unlock()
+			break
+		}
+		mutex.Unlock()
+		runtime.Gosched()
+	}
+	// 8 racers, test the beginning, middle, and end
+	tableTests := []struct {
+		place int
+		bib   int
+		code  int
+	}{
+		{0, 1, 409}, // no place #0
+		{1, 0, 409}, // no bib #0 in test_runners.csv
+		{1, 1, 301},
+		{2, 2, 301},
+		{3, 3, 301},
+		{4, 4, 301},
+		{4, 5, 301}, // correcting input
+		{5, 4, 301}, // now 4 actually crossed the line in place 5
+		{6, 6, 301},
+	}
+	for _, x := range tableTests {
+		req, err := http.NewRequest("post", "", nil)
+		req.ParseForm()
+		req.Form.Set("next", strconv.Itoa(x.place))
+		req.Form.Set("bib", strconv.Itoa(x.bib))
+		t.Nil(err)
+		w := httptest.NewRecorder()
+		oldBib := 0
+		mutex.Lock()
+		if x.place > 0 && results[x.place-1].Entry != nil {
+			oldBib = results[x.place-1].Entry.Bib
+		}
+		mutex.Unlock()
+		linkBib(w, req)
+		mutex.Lock()
+		if oldBib != 0 {
+			t.Equal(bibbedEntries[oldBib].Bib, oldBib)
+			t.Nil(bibbedEntries[oldBib].Result)
+		}
+		mutex.Unlock()
+		t.Equal(w.Code, x.code)
 	}
 }
 

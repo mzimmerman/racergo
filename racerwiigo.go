@@ -175,24 +175,29 @@ func download(w http.ResponseWriter, r *http.Request) {
 		if result.Entry == nil {
 			csvData = append(csvData, append([]string{"", "", "", "", "", strconv.Itoa(int(result.Place)), result.Time.String()}, blank...))
 		} else {
-			gender := "F"
-			if result.Entry.Male {
-				gender = "M"
-			}
-			csvData = append(csvData, append([]string{result.Entry.Fname, result.Entry.Lname, strconv.Itoa(int(result.Entry.Age)), gender, strconv.Itoa(int(result.Entry.Bib)), strconv.Itoa(int(result.Place)), result.Time.String()}, result.Entry.Optional...))
+			csvData = append(csvData, append([]string{result.Entry.Fname, result.Entry.Lname, strconv.Itoa(int(result.Entry.Age)), gender(result.Entry.Male), strconv.Itoa(int(result.Entry.Bib)), strconv.Itoa(int(result.Place)), result.Time.String()}, result.Entry.Optional...))
 		}
 	}
 	for _, entry := range unbibbedEntries {
-		gender := "F"
-		if entry.Male {
-			gender = "M"
+		csvData = append(csvData, append([]string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), gender(entry.Male), "", "", ""}, entry.Optional...))
+	}
+	for _, entry := range bibbedEntries {
+		if entry.Result != nil {
+			continue // already included in results export
 		}
-		csvData = append(csvData, append([]string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), gender, "", "", ""}, entry.Optional...))
+		csvData = append(csvData, append([]string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), gender(entry.Male), strconv.Itoa(entry.Bib), "", ""}, entry.Optional...))
 	}
 	mutex.Unlock()
 	writer := csv.NewWriter(w)
 	writer.WriteAll(csvData)
 	writer.Flush()
+}
+
+func gender(male bool) string {
+	if male {
+		return "M"
+	}
+	return "F"
 }
 
 func uploadPrizes(w http.ResponseWriter, r *http.Request) {

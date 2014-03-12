@@ -1,11 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"github.com/remogatto/prettytest"
 
 	"net/http"
 	"net/http/httptest"
-	"runtime"
 	"strconv"
 	"testing"
 	"time"
@@ -23,31 +23,15 @@ func TestRunner(t *testing.T) {
 	)
 }
 
-func startRace() chan bool {
-	useWiimote = false
-	ready := make(chan bool)
-	go raceFunc(ready)
-	<-ready                 // ready to process
-	racerChan <- time.Now() // start the race
-	return ready
-}
-
-func stopRace(ready chan bool) {
-	statusChan <- Finished
-	<-ready
-	for {
-		select {
-		// need to empty all unprocessed actions left over from test to properly clean up
-		case <-racerChan:
-		case <-statusChan:
-		default:
-			return
-		}
-	}
+func startRace() {
+	reset()
+	r, _ := http.NewRequest("get", "/start", nil)
+	w := httptest.NewRecorder()
+	startHandler(w, r)
 }
 
 func (t *testSuite) TestLoadRacers() {
-	defer stopRace(startRace())
+	startRace()
 	// race is started, load the racers
 	req, err := uploadFile("test_runners.csv")
 	t.Nil(err)
@@ -84,75 +68,8 @@ func (t *testSuite) TestLoadRacers() {
 	mutex.Unlock()
 }
 
-func (t *testSuite) TestRemoveRacer() {
-	defer stopRace(startRace())
-	// race is started, load the racers
-	req, err := uploadFile("test_prizes.json")
-	t.Nil(err)
-	t.Not(t.Nil(req))
-	w := httptest.NewRecorder()
-	uploadPrizes(w, req)
-	t.Equal(w.Code, 301)
-	mutex.Lock()
-	t.Equal(len(prizes), 26)
-	mutex.Unlock()
-	req, err = uploadFile("test_runners_prizes.csv")
-	t.Nil(err)
-	t.Not(t.Nil(req))
-	w = httptest.NewRecorder()
-	uploadRacers(w, req)
-	t.Equal(w.Code, 301)
-	now := time.Now()
-	mutex.Lock()
-	for x := 0; x < len(bibbedEntries); x++ {
-		now = now.Add(time.Second)
-		racerChan <- now // have everyone cross the line with different times
-	}
-	mutex.Unlock()
-	for {
-		mutex.Lock()
-		if len(results) >= len(bibbedEntries) {
-			mutex.Unlock()
-			break
-		}
-		mutex.Unlock()
-		runtime.Gosched()
-	}
-	// 8 racers, test the beginning, middle, and end
-	mutex.Lock()
-	tableTests := []struct {
-		place  int
-		code   int
-		length int
-		victim *Result
-	}{
-		{0, 409, 8, nil},
-		{1, 301, 7, results[0]},
-		{3, 301, 6, results[3]},
-		{6, 301, 5, results[7]},
-	}
-	mutex.Unlock()
-	for _, x := range tableTests {
-		req, err := http.NewRequest("post", "", nil)
-		req.ParseForm()
-		req.Form.Set("place", strconv.Itoa(x.place))
-		t.Nil(err)
-		w := httptest.NewRecorder()
-		mutex.Lock()
-		if x.place != 0 {
-			t.Equal(results[x.place-1], x.victim)
-		}
-		mutex.Unlock()
-		removeRacer(w, req)
-		t.Equal(w.Code, x.code)
-		mutex.Lock()
-		t.Equal(len(results), x.length)
-		mutex.Unlock()
-	}
-}
-
-func (t *testSuite) TestLink() {
-	defer stopRace(startRace())
+func (t *testSuite) TestLink() { // includes removing of racers
+	startRace()
 	// race is started, load the racers
 	req, err := uploadFile("test_runners.csv")
 	t.Nil(err)
@@ -160,64 +77,61 @@ func (t *testSuite) TestLink() {
 	w := httptest.NewRecorder()
 	uploadRacers(w, req)
 	t.Equal(w.Code, 301)
-	now := time.Now()
-	mutex.Lock()
-	for x := 0; x < len(bibbedEntries); x++ {
-		now = now.Add(time.Second)
-		racerChan <- now // have everyone cross the line with different times
-	}
-	mutex.Unlock()
-	for {
-		mutex.Lock()
-		if len(results) >= len(bibbedEntries) {
-			mutex.Unlock()
-			break
-		}
-		mutex.Unlock()
-		runtime.Gosched()
-	}
 	// 8 racers, test the beginning, middle, and end
 	tableTests := []struct {
-		place int
-		bib   int
-		code  int
+		place     int
+		bib       int
+		code      int
+		confirmed bool
+		remove    bool
 	}{
-		{0, 1, 409}, // no place #0
-		{1, 0, 409}, // no bib #0 in test_runners.csv
-		{1, 1, 301},
-		{2, 2, 301},
-		{3, 3, 301},
-		{4, 4, 301},
-		{4, 5, 301}, // correcting input
-		{5, 4, 301}, // now 4 actually crossed the line in place 5
-		{6, 6, 301},
+		{1, 0, 409, false, false}, // no bib #0 in test_runners.csv
+		{1, 1, 301, false, false},
+		{1, 1, 301, false, true},
+		{1, 1, 301, false, true},
+		{1, 1, 301, false, false},
+		{2, 2, 301, false, false},
+		{2, 2, 301, false, true},
+		{2, 2, 301, false, false},
+		{3, 3, 301, false, false},
+		{4, 4, 301, false, false},
+		{3, 3, 301, false, true},  // remove bib 3 from place 3
+		{4, 3, 301, false, false}, // re-add 3 which will swap their positions
+		{5, 5, 301, false, false},
+		{6, 6, 301, false, false},
+		{1, 1, 301, true, false},
+		{2, 2, 301, true, false},
+		{4, 3, 301, true, false},
+		{3, 4, 301, true, false},
+		{5, 5, 301, true, false},
+		{6, 6, 301, true, false},
 	}
-	for _, x := range tableTests {
+	for i, x := range tableTests {
 		req, err := http.NewRequest("post", "", nil)
 		req.ParseForm()
-		req.Form.Set("next", strconv.Itoa(x.place))
 		req.Form.Set("bib", strconv.Itoa(x.bib))
+		if x.remove {
+			req.Form.Set("remove", "true")
+		}
 		t.Nil(err)
 		w := httptest.NewRecorder()
-		oldBib := 0
-		mutex.Lock()
-		if x.place > 0 && results[x.place-1].Entry != nil {
-			oldBib = results[x.place-1].Entry.Bib
-		}
-		mutex.Unlock()
 		linkBib(w, req)
-		mutex.Lock()
-		if oldBib != 0 {
-			t.Equal(bibbedEntries[oldBib].Bib, oldBib)
-			t.Nil(bibbedEntries[oldBib].Result)
+		t.Equal(x.code, w.Code, fmt.Sprintf("Iteration - %d, Expected %d, got %d - %s", i, x.code, w.Code, w.Body.Bytes()))
+		if x.bib <= 0 || x.remove {
+			continue
 		}
-		mutex.Unlock()
-		t.Equal(w.Code, x.code)
+		func() {
+			mutex.Lock()
+			defer mutex.Unlock()
+			t.Equal(results[x.place-1].Confirmed, x.confirmed, fmt.Sprintf("Iteration - %d, Result %v confirmed != %v", i, results[x.place-1], x.confirmed))
+			t.Equal(bibbedEntries[x.bib].Result, results[x.place-1], fmt.Sprintf("Iteration - %d, Entry %v is not in place %d", i, bibbedEntries[x.bib], x.place))
+			t.Equal(int(bibbedEntries[x.bib].Result.Place), x.place, fmt.Sprintf("Iteration - %d, Bib %d is not in place %d but place %d!", i, x.bib, x.place, bibbedEntries[x.bib].Result.Place))
+		}()
 	}
 }
 
 func (t *testSuite) TestPrizes() {
-	defer stopRace(startRace())
+	startRace()
 	// race is started, load the racers
 	req, err := uploadFile("test_prizes.json")
 	t.Nil(err)
@@ -235,30 +149,14 @@ func (t *testSuite) TestPrizes() {
 	w = httptest.NewRecorder()
 	uploadRacers(w, req)
 	t.Equal(w.Code, 301)
-	now := time.Now()
-	mutex.Lock()
-	for x := 0; x < len(bibbedEntries); x++ {
-		now = now.Add(time.Second)
-		racerChan <- now // have everyone cross the line with different times
-	}
-	mutex.Unlock()
-	bibslength := 0
-	for {
-		mutex.Lock()
-		if len(results) >= len(bibbedEntries) {
-			bibslength = len(bibbedEntries)
-			mutex.Unlock()
-			break
-		}
-		mutex.Unlock()
-		runtime.Gosched()
-	}
-	for x := 1; x <= bibslength; x++ {
+	for x := 1; x <= len(bibbedEntries); x++ {
 		req, err = http.NewRequest("post", "", nil)
 		req.ParseForm()
-		req.Form.Set("next", strconv.Itoa(x))
 		req.Form.Set("bib", strconv.Itoa(x))
 		t.Nil(err)
+		w = httptest.NewRecorder()
+		linkBib(w, req)
+		t.Equal(w.Code, 301)
 		w = httptest.NewRecorder()
 		linkBib(w, req)
 		t.Equal(w.Code, 301)

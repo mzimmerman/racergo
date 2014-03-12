@@ -1,16 +1,5 @@
 package main
 
-/*
-#cgo CFLAGS: -I/usr/include
-#cgo LDFLAGS: -lcwiid
-#include "racerwiigo.h"
-#include <stdlib.h>
-#include <cwiid.h>
-#include <time.h>
-#include <bluetooth/bluetooth.h>
-*/
-import "C"
-
 import (
 	"bytes"
 	"encoding/csv"
@@ -18,54 +7,28 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-	"unsafe"
 )
 
-var buttons = []_Ctype_uint16_t{ // only the A button is used for this program
-	C.CWIID_BTN_A,
-	//C.CWIID_BTN_B,
-	//C.CWIID_BTN_1,
-	//C.CWIID_BTN_2,
-	//C.CWIID_BTN_MINUS,
-	//C.CWIID_BTN_HOME,
-	//C.CWIID_BTN_LEFT,
-	//C.CWIID_BTN_RIGHT,
-	//C.CWIID_BTN_DOWN,
-	//C.CWIID_BTN_UP,
-	//C.CWIID_BTN_PLUS,
-}
-
-const (
-	Disconnected int8 = iota
-	Error        int8 = iota
-	Finished     int8 = iota
-)
-
-var buttonStatus []bool
-
-var racerChan chan time.Time
-var statusChan chan int8
-var callback = goCwiidCallback // so it's not garbage collected
-var errCallback = goErrCallback
-var start *time.Time
+var startRaceChan chan time.Time
+var raceHasStarted bool = false
+var raceStart time.Time
 var optionalEntryFields []string
 var bibbedEntries map[int]*Entry   // map of Bib #s
 var unbibbedEntries map[int]*Entry // map of sequential Ids
 var results []*Result
+var auditLog []Audit
 var raceResultsTemplate *template.Template
 var errorTemplate *template.Template
-var useWiimote = true
-var wiimoteConnected = false
 var prizes []*Prize
 var mutex sync.Mutex
 var serverHandlers chan bool
@@ -92,10 +55,16 @@ type Entry struct {
 	Result   *Result
 }
 
+type Audit struct {
+	Time HumanDuration
+	Bib  int
+}
+
 type Result struct {
-	Time  HumanDuration
-	Place uint
-	Entry *Entry
+	Time      HumanDuration
+	Place     uint
+	Entry     *Entry
+	Confirmed bool
 }
 
 func (hd HumanDuration) String() string {
@@ -106,56 +75,6 @@ func (hd HumanDuration) String() string {
 
 func (hd HumanDuration) Clock() string {
 	return fmt.Sprintf("%#02d:%#02d:%02d", time.Duration(hd)/time.Hour, time.Duration(hd)/time.Minute%60, time.Duration(hd)/time.Second%60)
-}
-
-//export goCwiidCallback
-func goCwiidCallback(wm unsafe.Pointer, a int, mesg *C.struct_cwiid_btn_mesg, tp unsafe.Pointer) {
-	//defer C.free(unsafe.Pointer(mesg))
-	var messages []C.struct_cwiid_btn_mesg
-	sliceHeader := (*reflect.SliceHeader)((unsafe.Pointer(&messages)))
-	sliceHeader.Cap = a
-	sliceHeader.Len = a
-	sliceHeader.Data = uintptr(unsafe.Pointer(mesg))
-	for _, m := range messages {
-		if m._type != C.CWIID_MESG_BTN {
-			statusChan <- Error
-			continue
-		}
-		for x, button := range buttons {
-			if m.buttons&button == button {
-				if !buttonStatus[x] {
-					if button == C.CWIID_BTN_A {
-						racerChan <- time.Now()
-						//} else if button == C.CWIID_BTN_HOME {
-						//	statusChan <- Finished
-					}
-					buttonStatus[x] = true
-				}
-			} else {
-				buttonStatus[x] = false
-			}
-		}
-	}
-}
-
-//export goErrCallback
-func goErrCallback(wm unsafe.Pointer, char *C.char, ap unsafe.Pointer) {
-	//func goErrCallback(wm *C.cwiid_wiimote_t, char *C.char, ap C.va_list) {
-	str := C.GoString(char)
-	switch str {
-	case "No Bluetooth interface found":
-		fallthrough
-	case "no such device":
-		fmt.Printf("No Bluetooth device found\n")
-		os.Exit(1)
-	case "Socket connect error (control channel)":
-		fallthrough
-	case "No wiimotes found":
-		statusChan <- Disconnected
-	default:
-		fmt.Printf("Inside error calback - %s\n", str)
-		statusChan <- Error
-	}
 }
 
 func download(w http.ResponseWriter, r *http.Request) {
@@ -213,6 +132,7 @@ func uploadPrizes(w http.ResponseWriter, r *http.Request) {
 	}
 	jsonin := json.NewDecoder(part)
 	mutex.Lock()
+	defer mutex.Unlock()
 	prizes = make([]*Prize, 0)
 	for {
 		var prize Prize
@@ -222,7 +142,6 @@ func uploadPrizes(w http.ResponseWriter, r *http.Request) {
 		}
 		if err != nil {
 			showErrorForAdmin(w, "Error fetching Prize Configurations - %s", err)
-			mutex.Unlock()
 			return
 		}
 		prizes = append(prizes, &prize)
@@ -233,7 +152,6 @@ func uploadPrizes(w http.ResponseWriter, r *http.Request) {
 		}
 		calculatePrizes(result)
 	}
-	mutex.Unlock()
 	http.Redirect(w, r, "/admin", 301)
 }
 
@@ -286,6 +204,7 @@ func uploadRacers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mutex.Lock()
+	defer mutex.Unlock()
 
 	// make the maps and unlink all previous relationships
 	bibbedEntries = make(map[int]*Entry)
@@ -339,64 +258,107 @@ func uploadRacers(w http.ResponseWriter, r *http.Request) {
 			bibbedEntries[entry.Bib] = entry
 		}
 	}
-	mutex.Unlock()
 	http.Redirect(w, r, "/admin", 301)
 }
 
-func linkBib(w http.ResponseWriter, r *http.Request) {
-	err := r.ParseForm()
-	next, err := strconv.Atoi(r.Form.Get("next"))
+func startHandler(w http.ResponseWriter, r *http.Request) {
+	raceStart = time.Now()
+	raceHasStarted = true
+	startRaceChan <- raceStart
+	http.Redirect(w, r, "/admin", 301)
+}
+
+func init() {
+	startRaceChan = make(chan time.Time)
+	go listenForRacers()
+	numHandlers := runtime.NumCPU()
+	runtime.GOMAXPROCS(numHandlers)
+	if numHandlers >= 2 {
+		// want to leave one cpu not handling racer http requests so as to handle the processing of racers quickly
+		numHandlers--
+	}
+	serverHandlers = make(chan bool, numHandlers)
+	for x := 0; x < numHandlers; x++ {
+		serverHandlers <- true // fill the channel with valid goroutines
+	}
+	var err error
+	raceResultsTemplate, err = template.ParseFiles("raceResults.template")
 	if err != nil {
-		showErrorForAdmin(w, "Error %s getting next", err)
+		log.Fatalf("Error parsing template! - %s\n", err)
 		return
 	}
-	if next > len(results) {
-		showErrorForAdmin(w, "Overall place runner #%d has not crossed the finish line yet", next)
+	errorTemplate, err = template.ParseFiles("error.template")
+	if err != nil {
+		log.Fatalf("Error parsing template! - %s\n", err)
 		return
 	}
-	if next == 0 {
-		showErrorForAdmin(w, "Can't assign bib for place 0, we start at place 1")
+}
+
+func linkBib(w http.ResponseWriter, r *http.Request) {
+	if !raceHasStarted {
+		showErrorForAdmin(w, "Cannot link a bib, the race hasn't started!")
 		return
 	}
-	bib, err := strconv.Atoi(r.Form.Get("bib"))
+	removeBib := r.FormValue("remove") == "true"
+	bib, err := strconv.Atoi(r.FormValue("bib"))
+	if err != nil {
+		showErrorForAdmin(w, "Error %s getting bib number", err)
+		return
+	}
 	if bib < 0 {
 		showErrorForAdmin(w, "Cannot assign a negative bib number of %d", bib)
 		return
 	}
+	deltaT := HumanDuration(time.Since(raceStart))
 	mutex.Lock()
-	if err == nil {
-		if _, ok := bibbedEntries[bib]; ok {
-			if bibbedEntries[bib].Result != nil {
-				showErrorForAdmin(w, "Bib number %d already crossed the finish line in place #%d", bib, bibbedEntries[bib].Result.Place)
-				mutex.Unlock()
-				return
-			}
-			recalculateAll := results[next-1].Entry != nil
-			// remove the old association if there was any
-			if recalculateAll {
-				bibbedEntries[results[next-1].Entry.Bib].Result = nil
-				results[next-1].Entry = nil
-			}
-			// make the new association
-			results[next-1].Entry = bibbedEntries[bib]
-			bibbedEntries[bib].Result = results[next-1]
-			fmt.Printf("Set bib for place %d to %d\n", next, bib)
-			if recalculateAll {
-				recomputeAllPrizes()
-			} else {
-				calculatePrizes(results[next-1])
-			}
-		} else {
-			showErrorForAdmin(w, "Bib number %d was not assigned to anyone.", bib)
-			mutex.Unlock()
-			return
-		}
-	} else {
-		showErrorForAdmin(w, "Error %s setting bib for place %d to %d", err, next, bib)
-		mutex.Unlock()
+	defer mutex.Unlock()
+	auditLog = append(auditLog, Audit{deltaT, bib})
+	entry, ok := bibbedEntries[bib]
+	if !ok {
+		showErrorForAdmin(w, "Bib number %d was not assigned to anyone.", bib)
 		return
 	}
-	mutex.Unlock()
+	if removeBib {
+		if entry.Result == nil {
+			// entry already removed, act successful
+			http.Redirect(w, r, "/admin", 301)
+			return
+		}
+		index := int(entry.Result.Place) - 1
+		log.Printf("Bib = %d, index = %d, len(results) = %d", bib, index, len(results))
+		entry.Result = nil
+		if index >= len(results) {
+			// something's out of whack here -- The Entry has a Result but the Result isn't in the results slice
+			// the fix is removing the entry's result which happens before this if statement
+			showErrorForAdmin(w, "Bib has a result recorded but is not in the results table! - attempted to fix it")
+			return
+		}
+		results = append(results[:index], results[index+1:]...)
+		for x := index; x < len(results); x++ {
+			results[x].Place = results[x].Place - 1
+		}
+		http.Redirect(w, r, "/admin", 301)
+		return
+	}
+	if entry.Result != nil {
+		if !entry.Result.Confirmed {
+			entry.Result.Confirmed = true
+			http.Redirect(w, r, "/admin", 301)
+			return
+		}
+		showErrorForAdmin(w, "Bib number %d already confirmed for place #%d", bib, entry.Result.Place)
+		return
+	}
+	result := &Result{
+		Time:      deltaT,                 // Larry modifed to use delta time
+		Place:     uint(len(results) + 1), // Larry explicit cast
+		Confirmed: false,
+		Entry:     entry,
+	}
+	results = append(results, result)
+	entry.Result = result
+	log.Printf("Set bib for place %d to %d\n", result.Place, bib)
+	calculatePrizes(result)
 	http.Redirect(w, r, "/admin", 301)
 	return
 }
@@ -404,7 +366,7 @@ func linkBib(w http.ResponseWriter, r *http.Request) {
 func showErrorForAdmin(w http.ResponseWriter, message string, args ...interface{}) {
 	w.WriteHeader(409) // conflict header, most likely due to old information in the client
 	msg := fmt.Sprintf(message, args...)
-	fmt.Println(msg)
+	log.Println(msg)
 	if errorTemplate == nil {
 		fmt.Fprintf(w, msg)
 		return
@@ -415,38 +377,7 @@ func showErrorForAdmin(w http.ResponseWriter, message string, args ...interface{
 	}
 }
 
-func removeRacer(w http.ResponseWriter, r *http.Request) {
-	place, err := strconv.Atoi(r.FormValue("place"))
-	if err != nil {
-		showErrorForAdmin(w, "Error %s getting place", err)
-		return
-	}
-	mutex.Lock()
-	if place <= len(results) && place > 0 {
-		newresults := make([]*Result, len(results)-1)
-		x := copy(newresults, results[:place-1]) + 1
-		for {
-			if x < len(results) {
-				results[x].Place = uint(x) // bump the place down one to its index
-				newresults[x-1] = results[x]
-				x++
-			} else {
-				break
-			}
-		}
-		results = newresults
-	} else {
-		showErrorForAdmin(w, "Could not remove runner in place %d", place)
-		mutex.Unlock()
-		return
-	}
-	recomputeAllPrizes()
-	mutex.Unlock()
-	http.Redirect(w, r, "/admin", 301)
-	return
-}
-
-// mutex should be locked already when calling this
+// mutex needs to be locked already when calling this
 func recomputeAllPrizes() {
 	// now need to recompute the prize results
 	for _, prize := range prizes {
@@ -472,23 +403,21 @@ func assignBib(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mutex.Lock()
+	defer mutex.Unlock()
 
 	if entry, ok := unbibbedEntries[id]; ok {
 		if _, ok = bibbedEntries[bib]; ok {
 			showErrorForAdmin(w, "Bib # %d already assigned to %s %s!", bib, bibbedEntries[bib].Fname, bibbedEntries[bib].Lname)
-			mutex.Unlock()
 			return
 		}
 		entry.Bib = bib
-		fmt.Printf("Set bib for %s %s to %d", entry.Fname, entry.Lname, bib)
+		log.Printf("Set bib for %s %s to %d", entry.Fname, entry.Lname, bib)
 		delete(unbibbedEntries, id)
 		bibbedEntries[entry.Bib] = entry
 	} else {
 		showErrorForAdmin(w, "Id %d was not assigned to anyone.", id)
-		mutex.Unlock()
 		return
 	}
-	mutex.Unlock()
 	http.Redirect(w, r, "/admin", 301)
 	return
 }
@@ -519,6 +448,7 @@ func addEntry(w http.ResponseWriter, r *http.Request) {
 	entry.Male = r.FormValue("Male") == "true"
 	entry.Optional = make([]string, 0)
 	mutex.Lock()
+	defer mutex.Unlock()
 	for _, s := range optionalEntryFields {
 		entry.Optional = append(entry.Optional, r.FormValue(s))
 	}
@@ -526,31 +456,24 @@ func addEntry(w http.ResponseWriter, r *http.Request) {
 		bibbedEntries = make(map[int]*Entry)
 	}
 	bibbedEntries[entry.Bib] = entry
-	fmt.Printf("Added Entry - %#v\n", entry)
-	mutex.Unlock()
+	log.Printf("Added Entry - %#v\n", entry)
 	http.Redirect(w, r, "/admin", 301)
 	return
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
+	<-serverHandlers // wait until a goroutine to handle http requests is free
 	mutex.Lock()
+	defer func() {
+		serverHandlers <- true // wait for handler to finish, then put it back in the queue so another goroutine can spawn
+		mutex.Unlock()
+	}()
 	data := map[string]interface{}{"Racers": results}
 	if strings.HasSuffix(r.RequestURI, "admin") {
 		data["Admin"] = true
 		if len(unbibbedEntries) > 0 {
 			data["Unbibbed"] = unbibbedEntries
-			data["Optional"] = optionalEntryFields
 		}
-		for x := range results {
-			if results[x].Entry == nil {
-				data["Next"] = results[x].Place
-				break
-			}
-		}
-		if _, ok := data["Next"]; !ok {
-			data["Next"] = len(results) + 1
-		}
-		data["WiimoteConnected"] = wiimoteConnected
 		data["Fields"] = optionalEntryFields
 		end := len(results) - 10
 		if end < 0 {
@@ -558,22 +481,19 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		}
 		data["RecentRacers"] = results[end:]
 	}
-	if start != nil {
-		diff := time.Since(*start)
-		data["Start"] = start.Format("3:04:05")
+	if raceHasStarted {
+		diff := time.Since(raceStart)
+		data["Start"] = raceStart.Format("3:04:05")
 		data["Time"] = HumanDuration(diff).Clock()
 		data["Seconds"] = fmt.Sprintf("%.0f", diff.Seconds())
 		data["NextUpdate"] = diff / time.Millisecond % 1000
 		data["Prizes"] = prizes
 	}
-	mutex.Unlock()
-	<-serverHandlers // wait until a goroutine to handle http requests is free
 	raceResultsTemplate, _ = template.ParseFiles("raceResults.template")
 	err := raceResultsTemplate.Execute(w, data)
 	if err != nil {
 		fmt.Fprintf(w, "Error executing template - %s", err)
 	}
-	serverHandlers <- true // wait for handler to finish, then put it back in the queue so another goroutine can spawn
 }
 
 func uploadFile(filename string) (*http.Request, error) {
@@ -608,197 +528,64 @@ func uploadFile(filename string) (*http.Request, error) {
 	//io.Copy(os.Stderr, res.Body) // Replace this with Status.Code check
 }
 
-func main() {
-	numHandlers := runtime.NumCPU()
-	runtime.GOMAXPROCS(numHandlers)
-	if numHandlers >= 2 {
-		// want to leave one cpu not handling racer http requests so as to handle the wiimote quickly
-		numHandlers--
-	}
-	serverHandlers = make(chan bool, numHandlers)
-	for x := 0; x < numHandlers; x++ {
-		serverHandlers <- true // fill the channel with valid goroutines
-	}
-	var err error
-	raceResultsTemplate, err = template.ParseFiles("raceResults.template")
-	if err != nil {
-		fmt.Printf("Error parsing template! - %s\n", err)
-		return
-	}
-	errorTemplate, err = template.ParseFiles("error.template")
-	if err != nil {
-		fmt.Printf("Error parsing template! - %s\n", err)
-		return
-	}
-	ready := make(chan bool)
-	go raceFunc(ready)
-	<-ready
+func reset() {
+	log.Printf("Initializing the race")
+	raceHasStarted = false
+	results = make([]*Result, 0, 1024)
+	auditLog = make([]Audit, 0, 1024)
 	req, err := uploadFile("prizes.json")
 	if err == nil {
 		resp := httptest.NewRecorder()
 		uploadPrizes(resp, req)
 		if resp.Code != 301 {
-			fmt.Println("Unable to load the default prizes.json file.")
+			log.Println("Unable to load the default prizes.json file.")
 		}
 	} else {
-		fmt.Printf("Unable to load the default prizes.json file - %v\n", err)
+		log.Printf("Unable to load the default prizes.json file - %v\n", err)
 	}
-	if !useWiimote { // simulate the pressing of the wiimote A button for testing
-		go func() {
-			simulButton := time.NewTicker(time.Second * 10)
-			racerChan <- time.Now() // start race immediately
-			for {
-				select {
-				case <-simulButton.C:
-					racerChan <- time.Now()
-				}
-			}
-		}()
-	}
+}
+
+func main() {
+	reset()
 	http.HandleFunc("raceresults/", handler)
 	http.HandleFunc("raceresults/admin", handler)
+	http.HandleFunc("raceresults/start", startHandler)
 	http.HandleFunc("raceresults/linkBib", linkBib)
 	http.HandleFunc("raceresults/assignBib", assignBib)
 	http.HandleFunc("raceresults/addEntry", addEntry)
 	http.HandleFunc("raceresults/download", download)
 	http.HandleFunc("raceresults/uploadRacers", uploadRacers)
 	http.HandleFunc("raceresults/uploadPrizes", uploadPrizes)
-	http.HandleFunc("raceresults/removeRacer", removeRacer)
+	//http.HandleFunc("raceresults/removeRacer", removeRacer)
 	http.Handle("raceresults/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static/"))))
-	http.Handle("/", http.RedirectHandler("http://raceresults/", 307))
-	err = http.ListenAndServe(":80", nil)
+	//http.Handle("/", http.RedirectHandler("http://raceresults/", 307))
+	err := http.ListenAndServe(":80", nil)
 	if err != nil {
-		fmt.Printf("Error starting http server! - %s\n", err)
+		log.Printf("Error starting http server! - %s\n", err)
 		err = http.ListenAndServe(":8080", nil)
 		if err != nil {
-			fmt.Printf("Error starting http server! - %s\n", err)
+			log.Fatalf("Error starting http server! - %s\n", err)
 			return
 		}
 	}
 }
 
-func raceFunc(ready chan bool) {
-	buttonStatus = make([]bool, len(buttons))
-	var bdaddr C.bdaddr_t
-	var wm *C.struct_cwiid_wiimote_t
-	mutex.Lock()
-	start = nil
-	racerChan = make(chan time.Time, 10) // queue up to 10 racers at a time, since we're storing the time they crossed, we don't have to display/process them right away
-	statusChan = make(chan int8, 1)
-	ready <- true
+func listenForRacers() {
 	ticker := time.NewTicker(time.Second * 10)
-	results = make([]*Result, 0, 1024)
-	mutex.Unlock()
-	tty, err := os.OpenFile("/dev/tty0", os.O_RDWR, 0)
-	if err != nil {
-		fmt.Printf("Error playing sound! - %v\n", err)
-	} else {
-		defer tty.Close()
-	}
-	if useWiimote {
-		val, err := C.cwiid_set_err(C.getErrCallback())
-		if val != 0 || err != nil {
-			fmt.Printf("Error setting the callback to catch errors - %d - %v", val, err)
-			os.Exit(1)
-		}
-	}
+	var start time.Time
 	for {
-	outer:
-		for {
-			// clear the status channel for any previous errors
-			select {
-			case <-statusChan:
-			default:
-				break outer
+		select {
+		case start = <-startRaceChan:
+			ticker.Stop() // stop and "upgrade" the ticker for every second to track time
+			ticker = time.NewTicker(time.Second)
+			log.Printf("Race started @ %s\n", start.Format("3:04:05"))
+		case now := <-ticker.C:
+			if raceHasStarted {
+				log.Println(HumanDuration(now.Sub(start)))
+			} else {
+				log.Println("Waiting to start the race")
 			}
-		}
-		if tty != nil {
-			fmt.Fprintf(tty, "\x07")
-		}
-		if useWiimote {
-			fmt.Println("Press 1&2 on the Wiimote now")
-			wm, err = C.cwiid_open(&bdaddr, 0)
-			if err != nil {
-				fmt.Errorf("cwiid_open: %v\n", err)
-				continue
-			}
-			if wm == nil {
-				continue // could not connect to wiimote
-			}
-			res, err := C.cwiid_command(wm, C.CWIID_CMD_RPT_MODE, C.CWIID_RPT_BTN)
-			if res != 0 || err != nil {
-				fmt.Printf("Result of command = %d - %v\n", res, err)
-			}
-			res, err = C.cwiid_set_mesg_callback(wm, C.getCwiidCallback())
-			if res != 0 || err != nil {
-				fmt.Printf("Result of callback = %d - %v\n", res, err)
-			}
-			res, err = C.cwiid_enable(wm, C.CWIID_FLAG_MESG_IFC)
-			if res != 0 || err != nil {
-				fmt.Printf("Result of enable = %d - %v\n", res, err)
-			}
-			res, err = C.cwiid_set_led(wm, C.CWIID_LED4_ON)
-			if res != 0 || err != nil {
-				fmt.Printf("Set led result = %d\n", res)
-				fmt.Errorf("Err = %v", err)
-			}
-		}
-		mutex.Lock()
-		wiimoteConnected = true // it may be that useWiimote = false, in that case, we still want to "fake" that the wiimote is connected
-		mutex.Unlock()
-	loop:
-		for {
-			select {
-			case status := <-statusChan:
-				if status == Finished {
-					ticker.Stop()
-					ready <- false
-					// just stop listening for button presses on the wiimote, the race website can continue to run
-					// leave the WiimoteConnected status as it's only for alerting the race admins if the Wiimote loses connection
-					return
-				} else if status == Disconnected {
-					fmt.Println("Wiimote lost connection")
-					mutex.Lock()
-					wiimoteConnected = false
-					wm = nil
-					mutex.Unlock()
-					break loop // this takes us to the large loop above so that the wiimote can reconnect
-				} else if status == Error {
-					fmt.Println("An error occurred when communicating with the wiimote")
-					mutex.Lock()
-					wiimoteConnected = false
-					wm = nil
-					mutex.Unlock()
-					break loop // this takes us to the large loop above so that the wiimote can reconnect
-				}
-			case t := <-racerChan:
-				// play sound every time that the A button is handled from the Wiimote
-				if tty != nil {
-					fmt.Fprintf(tty, "\x07")
-				}
-				mutex.Lock()
-				if start == nil {
-					start = &t
-					ticker.Stop() // stop and "upgrade" the ticker for every second to track time
-					ticker = time.NewTicker(time.Second)
-					fmt.Printf("Race started @ %s\n", start.Format("3:04:05"))
-					results = results[:0]
-				} else {
-					place := len(results)
-					results = append(results, &Result{Place: uint(place + 1), Time: HumanDuration(t.Sub(*start))})
-					fmt.Printf("#%d - %s\n", results[place].Place, results[place].Time)
-				}
-				mutex.Unlock()
-			case now := <-ticker.C:
-				mutex.Lock()
-				if start != nil {
-					fmt.Println(HumanDuration(now.Sub(*start)))
-				} else {
-					fmt.Println("Waiting to start the race")
-				}
-				mutex.Unlock()
-				// update the clock
-			}
+			// update the clock
 		}
 	}
 }

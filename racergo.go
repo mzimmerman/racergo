@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/darkhelmet/env"
 )
 
 var startRaceChan chan time.Time
@@ -32,6 +34,7 @@ var errorTemplate *template.Template
 var prizes []*Prize
 var mutex sync.Mutex
 var serverHandlers chan bool
+var webserverHostname string
 
 type HumanDuration time.Duration
 
@@ -78,7 +81,7 @@ func (hd HumanDuration) Clock() string {
 }
 
 func download(w http.ResponseWriter, r *http.Request) {
-	filename := fmt.Sprintf("raceresults-%s.csv", time.Now().In(time.Local).Format("2006-01-02"))
+	filename := fmt.Sprintf(webserverHostname+"-%s.csv", time.Now().In(time.Local).Format("2006-01-02"))
 	w.Header().Set("Content-type", "application/csv")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
 	mutex.Lock()
@@ -269,6 +272,7 @@ func startHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func init() {
+	webserverHostname = env.StringDefault("RACERGOHOSTNAME", "raceresults")
 	startRaceChan = make(chan time.Time)
 	go listenForRacers()
 	numHandlers := runtime.NumCPU()
@@ -547,18 +551,17 @@ func reset() {
 
 func main() {
 	reset()
-	http.HandleFunc("raceresults/", handler)
-	http.HandleFunc("raceresults/admin", handler)
-	http.HandleFunc("raceresults/start", startHandler)
-	http.HandleFunc("raceresults/linkBib", linkBib)
-	http.HandleFunc("raceresults/assignBib", assignBib)
-	http.HandleFunc("raceresults/addEntry", addEntry)
-	http.HandleFunc("raceresults/download", download)
-	http.HandleFunc("raceresults/uploadRacers", uploadRacers)
-	http.HandleFunc("raceresults/uploadPrizes", uploadPrizes)
-	//http.HandleFunc("raceresults/removeRacer", removeRacer)
-	http.Handle("raceresults/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static/"))))
-	//http.Handle("/", http.RedirectHandler("http://raceresults/", 307))
+	http.HandleFunc(webserverHostname+"/", handler)
+	http.HandleFunc(webserverHostname+"/admin", handler)
+	http.HandleFunc(webserverHostname+"/start", startHandler)
+	http.HandleFunc(webserverHostname+"/linkBib", linkBib)
+	http.HandleFunc(webserverHostname+"/assignBib", assignBib)
+	http.HandleFunc(webserverHostname+"/addEntry", addEntry)
+	http.HandleFunc(webserverHostname+"/download", download)
+	http.HandleFunc(webserverHostname+"/uploadRacers", uploadRacers)
+	http.HandleFunc(webserverHostname+"/uploadPrizes", uploadPrizes)
+	http.Handle(webserverHostname+"/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static/"))))
+	http.Handle("/", http.RedirectHandler("http://"+webserverHostname+"/", 307))
 	err := http.ListenAndServe(":80", nil)
 	if err != nil {
 		log.Printf("Error starting http server! - %s\n", err)

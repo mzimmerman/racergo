@@ -272,7 +272,7 @@ func startHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func init() {
-	webserverHostname = env.StringDefault("RACERGOHOSTNAME", "raceresults")
+	webserverHostname = env.StringDefault("RACERGOHOSTNAME", "localhost:8080")
 	startRaceChan = make(chan time.Time)
 	go listenForRacers()
 	numHandlers := runtime.NumCPU()
@@ -562,9 +562,11 @@ func main() {
 	http.HandleFunc(webserverHostname+"/uploadPrizes", uploadPrizes)
 	http.Handle(webserverHostname+"/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static/"))))
 	http.Handle("/", http.RedirectHandler("http://"+webserverHostname+"/", 307))
+	log.Printf("Http server listening on port 80")
 	err := http.ListenAndServe(":80", nil)
 	if err != nil {
-		log.Printf("Error starting http server! - %s\n", err)
+		log.Printf("Error starting http server on port 80, trying 8080 instead! - %s\n", err)
+		log.Printf("Http server will listen on 8080 instead")
 		err = http.ListenAndServe(":8080", nil)
 		if err != nil {
 			log.Fatalf("Error starting http server! - %s\n", err)

@@ -23,7 +23,9 @@
 {{end}}
 
 {{define "downloadResults"}}
-	<a class="btn btn-default" href="/download">Download Results</a>
+	<div class="row">
+		<a class="btn btn-default" href="/download">Download Results</a>
+	</div>
 {{end}}
 
 {{define "linkBib"}}

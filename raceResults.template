@@ -1,3 +1,25 @@
+{{define "clock"}}
+	<div class="jumbotron">
+		{{if .Start}}
+			<h1 class="text-center" id="time">{{.Time}}</h1>
+			<p class="text-center">Race started at {{.Start}}</p>
+		{{else}}
+			{{if .Admin}}
+				<form role="form" action="start" method="post">
+					<button class="btn btn-primary col-xs-12" type="submit">Start</button>
+				</form>
+			{{else}}
+				<h1 class="text-center">00:00:00</h1>
+			{{end}}
+		{{end}}
+		{{if not .Admin}}
+			<p class="text-center">Race status will auto-refresh every 30 seconds</p>
+		{{else}}
+			<p class="text-center">Race status auto-refresh disabled, need to refresh manually or submit data</p>
+		{{end}}
+	</div>
+{{end}}
+
 {{define "uploadEntries"}}
 	<div class="row">
 		<form class="form-inline" role="form" action="uploadRacers" method="post" enctype="multipart/form-data">
@@ -85,29 +107,35 @@
 			<tr>
 				<td>
 					{{if $.Admin}}
+						<div class="col-xs-4">{{.Place}}</div>
 						{{if .Confirmed}}
-							<form role="form">
-								<fieldset disabled>
+							<div class="col-xs-4">
+								<form class="form-inline" role="form">
+									<fieldset disabled>
+										<button type="submit" class="btn btn-success btn-sm">
+											<span class="glyphicon glyphicon-ok"></span>
+										</button>
+									</fieldset>
+								</form>
+							</div>
+						{{else}}
+							<div class="col-xs-4">
+								<form class="form-inline" role="form" action="linkBib" method="post">
+									<input type="hidden" name="bib" value="{{.Entry.Bib}}">
 									<button type="submit" class="btn btn-success btn-sm">
 										<span class="glyphicon glyphicon-ok"></span>
-									</button>{{.Place}}
-								</fieldset>
-							</form>
-						{{else}}
-							<form class="inline-form" role="form" action="linkBib" method="post">
-								<button type="submit" class="btn btn-success btn-sm">
-									<span class="glyphicon glyphicon-ok"></span>
-								</button>
-								<input type="hidden" name="bib" value="{{.Entry.Bib}}">
-							</form>
-							<form class="inline-form" role="form" action="linkBib" method="post">
-								<button type="submit" class="btn btn-danger btn-sm">
-									<span class="glyphicon glyphicon-remove"></span>
-								</button>
-								<input type="hidden" name="remove" value="true">
-								<input type="hidden" name="bib" value="{{.Entry.Bib}}">
-							</form>
-							{{.Place}}
+									</button>
+								</form>
+							</div>
+							<div class="col-xs-4">
+								<form class="form-inline" role="form" action="linkBib" method="post">
+									<input type="hidden" name="remove" value="true">
+									<input type="hidden" name="bib" value="{{.Entry.Bib}}">
+									<button type="submit" class="btn btn-danger btn-sm">
+										<span class="glyphicon glyphicon-remove"></span>
+									</button>
+								</form>
+							</div>
 						{{end}}
 					{{end}}
 				</td>
@@ -127,6 +155,7 @@
 		<title>Race Results</title>
 		<meta name="viewport" content="width=device-width, initial-scale=1.0">
 		<link rel="stylesheet" media="screen" href="/static/bootstrap.min.css">
+		<link rel="stylesheet" media="screen" href="/static/bootstrap-theme.min.css">
 		{{if not .Admin}}
 			<meta http-equiv="refresh" content="30">
 		{{end}}
@@ -158,8 +187,13 @@
 		<div class="container">
 			{{if .Admin}}
 				{{if .Start}}
-					{{template "recentRacers" .}}
-					{{template "linkBib" .}}
+					<div class="col-md-6">
+						{{template "recentRacers" .}}
+						{{template "linkBib" .}}
+					</div>
+					<div class="col-md-6">
+						{{template "clock" .}}
+					</div>
 				{{else}}
 					{{template "addEntry" .}}
 					{{template "uploadEntries" .}}
@@ -172,25 +206,6 @@
 			{{else}}
 				<div class="col-md-12">
 			{{end}}
-				<div class="jumbotron">
-					{{if .Start}}
-						<h1 class="text-center" id="time">{{.Time}}</h1>
-						<p class="text-center">Race started at {{.Start}}</p>
-					{{else}}
-						{{if .Admin}}
-							<form role="form" action="start" method="post">
-								<button class="btn btn-primary col-xs-12" type="submit">Start</button>
-							</form>
-						{{else}}
-							<h1 class="text-center">00:00:00</h1>
-						{{end}}
-					{{end}}
-					{{if not .Admin}}
-						<p class="text-center">Race status will auto-refresh every 30 seconds</p>
-					{{else}}
-						<p class="text-center">Race status auto-refresh disabled, need to refresh manually or submit data</p>
-					{{end}}
-				</div>
 			</div>
 		</div>
 		{{if and .Admin .Unbibbed}}

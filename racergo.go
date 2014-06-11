@@ -561,6 +561,7 @@ func main() {
 	http.HandleFunc(webserverHostname+"/uploadRacers", uploadRacers)
 	http.HandleFunc(webserverHostname+"/uploadPrizes", uploadPrizes)
 	http.Handle(webserverHostname+"/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static/"))))
+	http.Handle(webserverHostname+"/fonts/", http.StripPrefix("/fonts/", http.FileServer(http.Dir("fonts/"))))
 	http.Handle("/", http.RedirectHandler("http://"+webserverHostname+"/", 307))
 	log.Printf("Http server listening on port 80")
 	err := http.ListenAndServe(":80", nil)

@@ -190,13 +190,19 @@
 					<div class="col-md-6">
 						{{template "recentRacers" .}}
 						{{template "linkBib" .}}
+						{{template "addEntry" .}}
 					</div>
 					<div class="col-md-6">
 						{{template "clock" .}}
 					</div>
 				{{else}}
+					<div class="col-md-6">
 					{{template "addEntry" .}}
 					{{template "uploadEntries" .}}
+					</div>
+					<div class="col-md-6">
+						{{template "clock" .}}
+					</div>
 				{{end}}
 				<div class="col-md-6">
 					{{template "uploadPrizes" .}}
@@ -280,7 +286,7 @@
 					<tr>
 						<td>
 							{{if $.Admin}}
-								<form class="form-inline" role="form" action="removeRacer" method="post">
+								<form class="form-inline" role="form" action="" method="post">
 									<button type="submit" class="btn btn-danger btn-sm">X</button>
 									<input type="hidden" name="place" value="{{.Place}}">
 									{{.Place}}

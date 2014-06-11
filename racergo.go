@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -563,16 +564,21 @@ func main() {
 	http.Handle(webserverHostname+"/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static/"))))
 	http.Handle(webserverHostname+"/fonts/", http.StripPrefix("/fonts/", http.FileServer(http.Dir("fonts/"))))
 	http.Handle("/", http.RedirectHandler("http://"+webserverHostname+"/", 307))
-	log.Printf("Http server listening on port 80")
-	err := http.ListenAndServe(":80", nil)
+	log.Printf("Starting http server")
+	listener, err := net.Listen("tcp", ":80")
 	if err != nil {
-		log.Printf("Error starting http server on port 80, trying 8080 instead! - %s\n", err)
-		log.Printf("Http server will listen on 8080 instead")
-		err = http.ListenAndServe(":8080", nil)
+		log.Printf("Error listening on port 80, trying 8080 instead! - %s\n", err)
+		listener, err = net.Listen("tcp4", ":8080")
 		if err != nil {
-			log.Fatalf("Error starting http server! - %s\n", err)
+			log.Fatalf("Error listening on port 8080! - %s\n", err)
 			return
 		}
+	}
+	port := strings.Split(listener.Addr().String(), ":")
+	log.Printf("Server listening on http://localhost:%s\n", port[len(port)-1])
+	err = http.Serve(listener, nil)
+	if err != nil {
+		log.Fatalf("Error starting http server! - %s\n", err)
 	}
 }
 

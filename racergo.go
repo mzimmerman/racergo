@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/darkhelmet/env"
-	"github.com/mzimmerman/sendgrid"
+	"github.com/mzimmerman/sendgrid-go"
 )
 
 var startRaceChan chan time.Time

@@ -12,4 +12,4 @@ RacerWii helps track racers on long distance races like a 5k.  It's meant to be 
 races where buying RFID chips for each runner is over the top and too costly.
 
 
-[![Build Status](https://drone.io/github.com/mzimmerman/racergo/status.png)](https://drone.io/github.com/mzimmerman/racergo/latest)
+[![Build Status](https://travis-ci.org/mzimmerman/racergo.svg?branch=master)](https://travis-ci.org/mzimmerman/racergo)

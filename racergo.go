@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/mail"
 	"os"
 	"runtime"
 	"strconv"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"github.com/darkhelmet/env"
+	"github.com/mzimmerman/sendgrid"
 )
 
 var startRaceChan chan time.Time
@@ -35,7 +37,51 @@ var errorTemplate *template.Template
 var prizes []*Prize
 var mutex sync.Mutex
 var serverHandlers chan bool
-var webserverHostname string
+var emailIndex = -1 // initialize it to an invalid value
+
+var config struct {
+	webserverHostname string // the url to serve on - default localhost:8080
+	sendgriduser      string // the Sendgrid user for e-mail integration
+	sendgridpass      string // the Sendgrid password for e-mail integration
+	emailField        string // the title of the Email field in the uploaded CSV - default Email
+	emailFrom         string // the from address for the e-mail integration
+	raceName          string // Name of the race, default Campus Life 5k Orchard Run
+}
+
+const SENDGRIDUSER = "API_USER"
+const SENDGRIDPASS = "API_PASS"
+
+func init() {
+	config.webserverHostname = env.StringDefault("RACERGOHOSTNAME", "localhost:8080")
+	config.sendgriduser = env.StringDefault("RACERGOSENDGRIDUSER", SENDGRIDUSER)
+	config.sendgridpass = env.StringDefault("RACERGOSENDGRIDPASS", SENDGRIDPASS)
+	config.raceName = env.StringDefault("RACERGORACENAME", "Campus Life 5k Orchard Run")
+	config.emailField = env.StringDefault("RACERGOEMAILFIELD", "Email")
+	config.emailFrom = env.StringDefault("RACERGOFROMEMAIL", "yfc@yfcmc.org")
+	startRaceChan = make(chan time.Time)
+	go listenForRacers()
+	numHandlers := runtime.NumCPU()
+	runtime.GOMAXPROCS(numHandlers)
+	if numHandlers >= 2 {
+		// want to leave one cpu not handling racer http requests so as to handle the processing of racers quickly
+		numHandlers--
+	}
+	serverHandlers = make(chan bool, numHandlers)
+	for x := 0; x < numHandlers; x++ {
+		serverHandlers <- true // fill the channel with valid goroutines
+	}
+	var err error
+	raceResultsTemplate, err = template.ParseFiles("raceResults.template")
+	if err != nil {
+		log.Fatalf("Error parsing template! - %s\n", err)
+		return
+	}
+	errorTemplate, err = template.ParseFiles("error.template")
+	if err != nil {
+		log.Fatalf("Error parsing template! - %s\n", err)
+		return
+	}
+}
 
 type HumanDuration time.Duration
 
@@ -82,7 +128,7 @@ func (hd HumanDuration) Clock() string {
 }
 
 func download(w http.ResponseWriter, r *http.Request) {
-	filename := fmt.Sprintf(webserverHostname+"-%s.csv", time.Now().In(time.Local).Format("2006-01-02"))
+	filename := fmt.Sprintf(config.webserverHostname+"-%s.csv", time.Now().In(time.Local).Format("2006-01-02"))
 	w.Header().Set("Content-type", "application/csv")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
 	mutex.Lock()
@@ -262,6 +308,22 @@ func uploadRacers(w http.ResponseWriter, r *http.Request) {
 			bibbedEntries[entry.Bib] = entry
 		}
 	}
+	emailIndex = -1
+	if config.sendgriduser == SENDGRIDUSER || config.sendgridpass == SENDGRIDPASS {
+		log.Printf("Sendgrid user/password information not found, not sending result emails")
+	} else if config.emailFrom == "" {
+		log.Printf("Address to send email from not populated, not sending result emails")
+	} else {
+		for o, val := range optionalEntryFields {
+			if val == config.emailField {
+				emailIndex = o
+				break
+			}
+		}
+		if emailIndex == -1 {
+			log.Printf("No e-mail addresses configured in optionally uploaded fields, not sending result e-mails")
+		}
+	}
 	http.Redirect(w, r, "/admin", 301)
 }
 
@@ -270,33 +332,6 @@ func startHandler(w http.ResponseWriter, r *http.Request) {
 	raceHasStarted = true
 	startRaceChan <- raceStart
 	http.Redirect(w, r, "/admin", 301)
-}
-
-func init() {
-	webserverHostname = env.StringDefault("RACERGOHOSTNAME", "localhost:8080")
-	startRaceChan = make(chan time.Time)
-	go listenForRacers()
-	numHandlers := runtime.NumCPU()
-	runtime.GOMAXPROCS(numHandlers)
-	if numHandlers >= 2 {
-		// want to leave one cpu not handling racer http requests so as to handle the processing of racers quickly
-		numHandlers--
-	}
-	serverHandlers = make(chan bool, numHandlers)
-	for x := 0; x < numHandlers; x++ {
-		serverHandlers <- true // fill the channel with valid goroutines
-	}
-	var err error
-	raceResultsTemplate, err = template.ParseFiles("raceResults.template")
-	if err != nil {
-		log.Fatalf("Error parsing template! - %s\n", err)
-		return
-	}
-	errorTemplate, err = template.ParseFiles("error.template")
-	if err != nil {
-		log.Fatalf("Error parsing template! - %s\n", err)
-		return
-	}
 }
 
 func linkBib(w http.ResponseWriter, r *http.Request) {
@@ -355,8 +390,8 @@ func linkBib(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result := &Result{
-		Time:      deltaT,                 // Larry modifed to use delta time
-		Place:     uint(len(results) + 1), // Larry explicit cast
+		Time:      deltaT,
+		Place:     uint(len(results) + 1),
 		Confirmed: false,
 		Entry:     entry,
 	}
@@ -365,7 +400,29 @@ func linkBib(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Set bib for place %d to %d\n", result.Place, bib)
 	calculatePrizes(result)
 	http.Redirect(w, r, "/admin", 301)
-	return
+	if emailIndex == -1 {
+		return
+	}
+	emailAddr := entry.Optional[emailIndex]
+	_, err = mail.ParseAddress(emailAddr)
+	if err != nil {
+		log.Printf("Error parsing e-mail address of %s\n", emailAddr)
+		return
+	}
+	go func(fname, lname, email string, time HumanDuration) {
+		m := sendgrid.NewMail()
+		client := sendgrid.NewSendGridClient(config.sendgriduser, config.sendgridpass)
+		m.AddTo(fmt.Sprintf("%s %s <%s>", fname, lname, email))
+		m.SetSubject(fmt.Sprintf("%s Results", config.raceName))
+		m.SetText(fmt.Sprintf("Congratulations %s %s!  You finished the %s in %s!", fname, lname, config.raceName, time))
+		m.SetFrom(config.emailFrom)
+		err := client.Send(m)
+		if err != nil {
+			log.Printf("Error sending mail to %s - %v", email, err)
+		} else {
+			log.Printf("Success sending %#v", m)
+		}
+	}(entry.Fname, entry.Lname, emailAddr, result.Time)
 }
 
 func showErrorForAdmin(w http.ResponseWriter, message string, args ...interface{}) {
@@ -470,8 +527,8 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	<-serverHandlers // wait until a goroutine to handle http requests is free
 	mutex.Lock()
 	defer func() {
-		serverHandlers <- true // wait for handler to finish, then put it back in the queue so another goroutine can spawn
 		mutex.Unlock()
+		serverHandlers <- true // wait for handler to finish, then put it back in the queue so another handler can work
 	}()
 	data := map[string]interface{}{"Racers": results}
 	if strings.HasSuffix(r.RequestURI, "admin") {
@@ -552,18 +609,18 @@ func reset() {
 
 func main() {
 	reset()
-	http.HandleFunc(webserverHostname+"/", handler)
-	http.HandleFunc(webserverHostname+"/admin", handler)
-	http.HandleFunc(webserverHostname+"/start", startHandler)
-	http.HandleFunc(webserverHostname+"/linkBib", linkBib)
-	http.HandleFunc(webserverHostname+"/assignBib", assignBib)
-	http.HandleFunc(webserverHostname+"/addEntry", addEntry)
-	http.HandleFunc(webserverHostname+"/download", download)
-	http.HandleFunc(webserverHostname+"/uploadRacers", uploadRacers)
-	http.HandleFunc(webserverHostname+"/uploadPrizes", uploadPrizes)
-	http.Handle(webserverHostname+"/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static/"))))
-	http.Handle(webserverHostname+"/fonts/", http.StripPrefix("/fonts/", http.FileServer(http.Dir("fonts/"))))
-	http.Handle("/", http.RedirectHandler("http://"+webserverHostname+"/", 307))
+	http.HandleFunc(config.webserverHostname+"/", handler)
+	http.HandleFunc(config.webserverHostname+"/admin", handler)
+	http.HandleFunc(config.webserverHostname+"/start", startHandler)
+	http.HandleFunc(config.webserverHostname+"/linkBib", linkBib)
+	http.HandleFunc(config.webserverHostname+"/assignBib", assignBib)
+	http.HandleFunc(config.webserverHostname+"/addEntry", addEntry)
+	http.HandleFunc(config.webserverHostname+"/download", download)
+	http.HandleFunc(config.webserverHostname+"/uploadRacers", uploadRacers)
+	http.HandleFunc(config.webserverHostname+"/uploadPrizes", uploadPrizes)
+	http.Handle(config.webserverHostname+"/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static/"))))
+	http.Handle(config.webserverHostname+"/fonts/", http.StripPrefix("/fonts/", http.FileServer(http.Dir("fonts/"))))
+	http.Handle("/", http.RedirectHandler("http://"+config.webserverHostname+"/", 307))
 	log.Printf("Starting http server")
 	listener, err := net.Listen("tcp", ":80")
 	if err != nil {

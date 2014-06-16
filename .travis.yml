@@ -1,2 +1,5 @@
 language: go
+install:
+  - go get github.com/mzimmerman/sendgrid-go
+  - go get github.com/darkhelmet/env
 script: go test -race

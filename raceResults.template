@@ -63,19 +63,19 @@
 {{define "addEntry"}}
 	<div class="row">
 		<form class="inline-form" role="form" action="addEntry" method="post">
-			<div class="form-group col-lg-2">
+			<div class="form-group col-lg-4">
 				<input class="form-control " type="text" name="Fname" placeholder="First" {{if .Start}}{{else}}autofocus{{end}}>
 			</div>
-			<div class="form-group col-lg-2">
+			<div class="form-group col-lg-4">
 				<input class="form-control " type="text" name="Lname" placeholder="Last">
 			</div>
-			<div class="form-group col-lg-2">
+			<div class="form-group col-lg-4">
 				<input class="form-control " type="number" name="Age" placeholder="Age">
 			</div>
-			<div class="form-group col-lg-2">
+			<div class="form-group col-lg-4">
 				<input class="form-control " type="number" name="Bib" placeholder="Bib">
 			</div>
-			<div class="form-group col-lg-2">
+			<div class="form-group col-lg-4">
 				<label class="radio-inline">
 					<input type="radio" name="Male" value="true">Male
 				</label>
@@ -84,7 +84,7 @@
 				</label>
 			</div>
 			{{range .Fields}}
-				<div class="form-group col-lg-2">
+				<div class="form-group col-lg-4">
 					<input class="form-control " type="text" name="{{.}}" placeholder="{{.}}">
 				</div>
 			{{end}}
@@ -184,7 +184,7 @@
 		{{end}}
 	</head>
 	<body>
-		<div class="container">
+		<div class="container-fluid">
 			{{if .Admin}}
 				{{if .Start}}
 					<div class="col-md-6">
@@ -216,7 +216,7 @@
 			</div>
 		</div>
 		{{if and .Admin .Unbibbed}}
-			<div class="container">
+			<div class="container-fluid">
 				<table class="table table-bordered table-condensed">
 					<tr>
 						<th>Assign Bib</th>
@@ -256,7 +256,7 @@
 			</div>
 		{{end}}
 		{{if not .Admin}}
-			<div class="container">
+			<div class="container-fluid">
 				{{range .Prizes}}
 					{{if .Winners}}
 						<div class="col-md-4">
@@ -273,7 +273,7 @@
 				{{end}}
 			</div>
 		{{end}}
-		<div class="container">
+		<div class="container-fluid">
 			<table class="table table-bordered table-condensed table-striped">
 				<tr>
 					<th>Overall Place</th>

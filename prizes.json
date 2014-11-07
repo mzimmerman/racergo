@@ -1,7 +1,7 @@
 {"Title":"Men's Overall", "LowAge":0, "HighAge":100,"Gender":"M","Amount":1,"WinAgain":false}
 {"Title":"Women's Overall", "LowAge":0, "HighAge":100,"Gender":"F","Amount":1,"WinAgain":false}
 
-{"Title":"Men's' U20", "LowAge":0, "HighAge":19,"Gender":"M","Amount":3,"WinAgain":true}
+{"Title":"Men's U20", "LowAge":0, "HighAge":19,"Gender":"M","Amount":3,"WinAgain":true}
 {"Title":"Women's U20", "LowAge":0, "HighAge":19,"Gender":"F","Amount":3,"WinAgain":true}
 
 {"Title":"Men's 20s", "LowAge":20, "HighAge":29,"Gender":"M","Amount":3,"WinAgain":true}

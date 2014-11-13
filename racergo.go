@@ -531,17 +531,42 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		serverHandlers <- true // wait for handler to finish, then put it back in the queue so another handler can work
 	}()
 	data := map[string]interface{}{"Racers": results}
-	if strings.HasSuffix(r.RequestURI, "admin") {
+	name := strings.Trim(r.URL.Path, "/")
+	switch name {
+	default:
+		name = "default"
+	case "admin":
 		data["Admin"] = true
 		if len(unbibbedEntries) > 0 {
 			data["Unbibbed"] = unbibbedEntries
 		}
 		data["Fields"] = optionalEntryFields
-		end := len(results) - 10
-		if end < 0 {
-			end = 0
+		recentRacers := make([]*Result, 0, len(results))
+		end := len(results)
+		for {
+			end--
+			if end < 0 {
+				break
+			}
+			recentRacers = append(recentRacers, results[end])
+			if end < len(results)-10 { // list no more than 10 most recent
+				break
+			}
 		}
-		data["RecentRacers"] = results[end:]
+		data["RecentRacers"] = recentRacers
+	case "results":
+		recentRacers := make([]*Result, 0, len(results))
+		end := len(results)
+		for {
+			end--
+			if end < 0 {
+				break
+			}
+			recentRacers = append(recentRacers, results[end])
+		}
+		data["RecentRacers"] = recentRacers
+	case "audit":
+		data["Audit"] = auditLog
 	}
 	if raceHasStarted {
 		diff := time.Since(raceStart)
@@ -549,10 +574,10 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		data["Time"] = HumanDuration(diff).Clock()
 		data["Seconds"] = fmt.Sprintf("%.0f", diff.Seconds())
 		data["NextUpdate"] = diff / time.Millisecond % 1000
-		data["Prizes"] = prizes
 	}
+	data["Prizes"] = prizes
 	raceResultsTemplate, _ = template.ParseFiles("raceResults.template")
-	err := raceResultsTemplate.Execute(w, data)
+	err := raceResultsTemplate.ExecuteTemplate(w, name, data)
 	if err != nil {
 		fmt.Fprintf(w, "Error executing template - %s", err)
 	}

@@ -137,6 +137,8 @@
 								</form>
 							</div>
 						{{end}}
+					{{else}}
+						{{.Place}}
 					{{end}}
 				</td>
 				<td>{{.Time}}</td>
@@ -149,17 +151,91 @@
 	</table>
 {{end}}
 
-<!DOCTYPE html>
-<html lang="en">
-	<head>
-		<title>Race Results</title>
-		<meta name="viewport" content="width=device-width, initial-scale=1.0">
-		<link rel="stylesheet" media="screen" href="/static/bootstrap.min.css">
-		<link rel="stylesheet" media="screen" href="/static/bootstrap-theme.min.css">
-		{{if not .Admin}}
-			<meta http-equiv="refresh" content="30">
-		{{end}}
-		{{if .Start}}
+{{define "results"}}
+	{{template "header" .}}
+		<title>Recent Race Results</title>
+		<meta http-equiv="refresh" content="3">
+	</head>
+	<body>
+		<div class="container-fluid">
+			<div class="col-md-4">
+				{{template "recentRacers" .}}
+			</div>
+			<div class="col-md-8">
+				{{template "raceResults" .}}
+			</div>
+		</div>
+	</body>
+</html>
+{{end}}
+
+{{define "raceResults"}}
+	{{range .Prizes}}
+		<div class="col-md-4">
+			<div class="panel panel-primary">
+				<div class="panel-heading">{{.Title}}</div>
+				<div class="panel-body">
+					{{range .Winners}}
+						<p>{{.Entry.Fname}} {{.Entry.Lname}}<span class="pull-right">{{.Time.String}}</span></p>
+					{{end}}
+				</div>
+			</div>
+		</div>
+	{{end}}
+{{end}}
+
+{{define "default"}}
+	{{template "header" .}}
+	<title>Race Results</title>
+	<meta http-equiv="refresh" content="30">
+	</head>
+	<body>
+		<div class="container-fluid">
+			<div class="col-md-12">
+				{{template "clock" .}}
+			</div>
+		</div>
+		<div class="container-fluid">
+			{{template "raceResults" .}}
+		</div>
+		<div class="container-fluid">
+			<table class="table table-bordered table-condensed table-striped">
+				<tr>
+					<th>Overall Place</th>
+					<th>Time</th>
+					<th>Bib #</th>
+					<th>First</th>
+					<th>Last</th>
+				</tr>
+				<tbody>
+				{{range .Racers}}
+					<tr>
+						<td>
+							{{if $.Admin}}
+								<form class="form-inline" role="form" action="" method="post">
+									<button type="submit" class="btn btn-danger btn-sm">X</button>
+									<input type="hidden" name="place" value="{{.Place}}">
+									{{.Place}}
+								</form>
+							{{else}}
+								{{.Place}}
+							{{end}}
+						</td>
+						<td>{{.Time}}</td>
+						<td>{{with .Entry}}{{.Bib}}{{end}}</td>
+						<td>{{with .Entry}}{{.Fname}}{{end}}</td>
+						<td>{{with .Entry}}{{.Lname}}{{end}}</td>
+					</tr>
+				{{end}}
+				</tbody>
+			</table>
+		</div>
+	</body>
+</html>
+{{end}}
+
+{{define "clockScript"}}
+	{{if .Start}}
 			<script type="text/javascript">
 				var seconds = {{.Seconds}};
 				function FormatNumberLength(num, length) {
@@ -170,7 +246,11 @@
 					return r;
 				}
 				function updateTime() {
-					document.getElementById("time").innerHTML = FormatNumberLength(Math.floor(seconds/60/60),2) + ":" + FormatNumberLength(Math.floor((seconds/60)%60),2) + ":" + FormatNumberLength((seconds%60),2);
+					var timeElement = document.getElementById("time");
+					if (timeElement == null) {
+						return;
+					}
+					timeElement.innerHTML = FormatNumberLength(Math.floor(seconds/60/60),2) + ":" + FormatNumberLength(Math.floor((seconds/60)%60),2) + ":" + FormatNumberLength((seconds%60),2);
 					seconds++;
 				}
 				function start() {
@@ -181,41 +261,49 @@
 				}
 				window.onload = start;
 			</script>
-		{{end}}
+	{{end}}
+{{end}}
+
+{{define "header"}}
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<link rel="stylesheet" media="screen" href="/static/bootstrap.min.css">
+		<link rel="stylesheet" media="screen" href="/static/bootstrap-theme.min.css">
+		{{template "clockScript" .}}
+{{end}}
+
+{{define "admin"}}
+	{{template "header" .}}
+		<title>Race Admin</title>
 	</head>
 	<body>
 		<div class="container-fluid">
-			{{if .Admin}}
-				{{if .Start}}
-					<div class="col-md-6">
-						{{template "recentRacers" .}}
-						{{template "linkBib" .}}
-						{{template "addEntry" .}}
-					</div>
-					<div class="col-md-6">
-						{{template "clock" .}}
-					</div>
-				{{else}}
-					<div class="col-md-6">
-					{{template "addEntry" .}}
-					{{template "uploadEntries" .}}
-					</div>
-					<div class="col-md-6">
-						{{template "clock" .}}
-					</div>
-				{{end}}
-				<div class="col-md-6">
-					{{template "uploadPrizes" .}}
-					{{template "downloadResults"}}
-				</div>
-				<div class="col-md-6">
-			{{else}}
-				<div class="col-md-12">
-					{{template "clock" .}}
-			{{end}}
+		{{if .Start}}
+			<div class="col-md-6">
+				{{template "recentRacers" .}}
+				{{template "linkBib" .}}
+				{{template "addEntry" .}}
 			</div>
+			<div class="col-md-6">
+				{{template "clock" .}}
+			</div>
+		{{else}}
+			<div class="col-md-6">
+				{{template "addEntry" .}}
+				{{template "uploadEntries" .}}
+			</div>
+			<div class="col-md-6">
+				{{template "clock" .}}
+			</div>
+		{{end}}
+		<div class="col-md-6">
+			{{template "uploadPrizes" .}}
+			{{template "downloadResults"}}
 		</div>
-		{{if and .Admin .Unbibbed}}
+		<div class="col-md-6">
+		{{if .Unbibbed}}
 			<div class="container-fluid">
 				<table class="table table-bordered table-condensed">
 					<tr>
@@ -255,55 +343,6 @@
 				</table>
 			</div>
 		{{end}}
-		{{if not .Admin}}
-			<div class="container-fluid">
-				{{range .Prizes}}
-					{{if .Winners}}
-						<div class="col-md-4">
-							<div class="panel panel-primary">
-								<div class="panel-heading">{{.Title}}</div>
-								<div class="panel-body">
-									{{range .Winners}}
-										<p>{{.Entry.Fname}} {{.Entry.Lname}}<span class="pull-right">{{.Time.String}}</span></p>
-									{{end}}
-								</div>
-							</div>
-						</div>
-					{{end}}
-				{{end}}
-			</div>
-		{{end}}
-		<div class="container-fluid">
-			<table class="table table-bordered table-condensed table-striped">
-				<tr>
-					<th>Overall Place</th>
-					<th>Time</th>
-					<th>Bib #</th>
-					<th>First</th>
-					<th>Last</th>
-				</tr>
-				<tbody>
-				{{range .Racers}}
-					<tr>
-						<td>
-							{{if $.Admin}}
-								<form class="form-inline" role="form" action="" method="post">
-									<button type="submit" class="btn btn-danger btn-sm">X</button>
-									<input type="hidden" name="place" value="{{.Place}}">
-									{{.Place}}
-								</form>
-							{{else}}
-								{{.Place}}
-							{{end}}
-						</td>
-						<td>{{.Time}}</td>
-						<td>{{with .Entry}}{{.Bib}}{{end}}</td>
-						<td>{{with .Entry}}{{.Fname}}{{end}}</td>
-						<td>{{with .Entry}}{{.Lname}}{{end}}</td>
-					</tr>
-				{{end}}
-				</tbody>
-			</table>
-		</div>
 	</body>
 </html>
+{{end}}

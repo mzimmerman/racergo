@@ -106,8 +106,9 @@ type Entry struct {
 }
 
 type Audit struct {
-	Time HumanDuration
-	Bib  int
+	Time   HumanDuration
+	Bib    int
+	Remove bool
 }
 
 type Result struct {
@@ -352,7 +353,7 @@ func linkBib(w http.ResponseWriter, r *http.Request) {
 	deltaT := HumanDuration(time.Since(raceStart))
 	mutex.Lock()
 	defer mutex.Unlock()
-	auditLog = append(auditLog, Audit{deltaT, bib})
+	auditLog = append(auditLog, Audit{Time: deltaT, Bib: bib, Remove: removeBib})
 	entry, ok := bibbedEntries[bib]
 	if !ok {
 		showErrorForAdmin(w, "Bib number %d was not assigned to anyone.", bib)
@@ -566,6 +567,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		}
 		data["RecentRacers"] = recentRacers
 	case "audit":
+		data["Admin"] = true
 		data["Audit"] = auditLog
 	}
 	if raceHasStarted {

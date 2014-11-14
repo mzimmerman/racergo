@@ -169,6 +169,32 @@
 </html>
 {{end}}
 
+{{define "audit"}}
+	{{template "header" .}}
+		<title>Audit Race</title>
+	</head>
+	<body>
+		<div class="container-fluid">
+			<table class="table table-bordered table-condensed table-striped">
+				<tr>
+					<th>Bib</th>
+					<th>Time</th>
+					<th>Removal</th>
+				</tr>
+				<tbody>
+				{{range .Audit}}
+					<tr>
+						<td>{{.Bib}}</td>
+						<td>{{.Time.String}}</td>
+						<td>{{.Remove}}</td>
+					</tr>
+				{{end}}
+			</table>
+		</div>
+	</body>
+</html>
+{{end}}
+
 {{define "raceResults"}}
 	{{range .Prizes}}
 		<div class="col-md-4">

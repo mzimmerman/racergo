@@ -236,17 +236,7 @@
 				<tbody>
 				{{range .Racers}}
 					<tr>
-						<td>
-							{{if $.Admin}}
-								<form class="form-inline" role="form" action="" method="post">
-									<button type="submit" class="btn btn-danger btn-sm">X</button>
-									<input type="hidden" name="place" value="{{.Place}}">
-									{{.Place}}
-								</form>
-							{{else}}
-								{{.Place}}
-							{{end}}
-						</td>
+						<td>{{.Place}}</td>
 						<td>{{.Time}}</td>
 						<td>{{with .Entry}}{{.Bib}}{{end}}</td>
 						<td>{{with .Entry}}{{.Fname}}{{end}}</td>
@@ -328,7 +318,7 @@
 			{{template "uploadPrizes" .}}
 			{{template "downloadResults"}}
 		</div>
-		<div class="col-md-6">
+		<div class="col-md-12">
 		{{if .Unbibbed}}
 			<div class="container-fluid">
 				<table class="table table-bordered table-condensed">

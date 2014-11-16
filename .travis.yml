@@ -2,5 +2,4 @@ language: go
 install:
   - go get -tags -appengine github.com/mzimmerman/sendgrid-go
   - go get github.com/darkhelmet/env
-  - go get github.com/remogatto/prettytest
 script: go test -race

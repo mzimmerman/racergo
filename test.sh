@@ -7,7 +7,5 @@ export RACERGOEMAILFIELD="Email"
 export RACERGOFROMEMAIL="yfc@yfcmc.org"
 
 # build the latest code
-go build
-
 # run under sudo so we can listen to port 80, this could be addressed other ways, but this is easiest
-sudo -E ./racergo
+go build && sudo -E ./racergo

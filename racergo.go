@@ -661,10 +661,10 @@ func main() {
 	port := strings.Split(listener.Addr().String(), ":")
 	portNum := port[len(port)-1]
 	log.Printf("Server listening on port %s\n", portNum)
-	log.Printf("Basic - http://localhost:%s",portNum)
-	log.Printf("Admin - http://localhost:%s/admin",portNum)
-	log.Printf("Audit - http://localhost:%s/audit",portNum)
-	log.Printf("Large Screen Live Results - http://localhost:%s/results",portNum)
+	log.Printf("Basic - http://localhost:%s", portNum)
+	log.Printf("Admin - http://localhost:%s/admin", portNum)
+	log.Printf("Audit - http://localhost:%s/audit", portNum)
+	log.Printf("Large Screen Live Results - http://localhost:%s/results", portNum)
 	err = http.Serve(listener, nil)
 	if err != nil {
 		log.Fatalf("Error starting http server! - %s\n", err)

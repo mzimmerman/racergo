@@ -38,6 +38,7 @@ var prizes []*Prize
 var mutex sync.Mutex
 var serverHandlers chan bool
 var emailIndex = -1 // initialize it to an invalid value
+var auditClean bool // used to ensure no changes have taken place before modifying data internally through /audit
 
 var config struct {
 	webserverHostname string // the url to serve on - default localhost:8080
@@ -171,17 +172,18 @@ func gender(male bool) string {
 func uploadPrizes(w http.ResponseWriter, r *http.Request) {
 	reader, err := r.MultipartReader()
 	if err != nil {
-		showErrorForAdmin(w, "Error getting Reader - %s", err)
+		showErrorForAdmin(w, r.Referer(), "Error getting Reader - %s", err)
 		return
 	}
 	part, err := reader.NextPart()
 	if err != nil {
-		showErrorForAdmin(w, "Error getting Part - %s", err)
+		showErrorForAdmin(w, r.Referer(), "Error getting Part - %s", err)
 		return
 	}
 	jsonin := json.NewDecoder(part)
 	mutex.Lock()
 	defer mutex.Unlock()
+	auditClean = false
 	prizes = make([]*Prize, 0)
 	for {
 		var prize Prize
@@ -190,7 +192,7 @@ func uploadPrizes(w http.ResponseWriter, r *http.Request) {
 			break // good, we processed them all!
 		}
 		if err != nil {
-			showErrorForAdmin(w, "Error fetching Prize Configurations - %s", err)
+			showErrorForAdmin(w, r.Referer(), "Error fetching Prize Configurations - %s", err)
 			return
 		}
 		prizes = append(prizes, &prize)
@@ -234,22 +236,22 @@ func calculatePrizes(r *Result) {
 func uploadRacers(w http.ResponseWriter, r *http.Request) {
 	reader, err := r.MultipartReader()
 	if err != nil {
-		showErrorForAdmin(w, "Error getting Reader - %s", err)
+		showErrorForAdmin(w, r.Referer(), "Error getting Reader - %s", err)
 		return
 	}
 	part, err := reader.NextPart()
 	if err != nil {
-		showErrorForAdmin(w, "Error getting Part - %s", err)
+		showErrorForAdmin(w, r.Referer(), "Error getting Part - %s", err)
 		return
 	}
 	csvIn := csv.NewReader(part)
 	rawEntries, err := csvIn.ReadAll()
 	if err != nil {
-		showErrorForAdmin(w, "Error Reading CSV file - %s", err)
+		showErrorForAdmin(w, r.Referer(), "Error Reading CSV file - %s", err)
 		return
 	}
 	if len(rawEntries) <= 1 {
-		showErrorForAdmin(w, "Either blank file or only supplied the header row")
+		showErrorForAdmin(w, r.Referer(), "Either blank file or only supplied the header row")
 		return
 	}
 	mutex.Lock()
@@ -326,6 +328,50 @@ func uploadRacers(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/admin", 301)
 }
 
+func auditPost(w http.ResponseWriter, r *http.Request) {
+	mutex.Lock()
+	defer mutex.Unlock()
+	if !auditClean {
+		showErrorForAdmin(w, r.Referer(), "Data modified since audit record pulled, no updates made.  Try again.")
+	}
+	auditClean = false
+	// wipe the in-memory data stores
+	newBibbedEntries := make(map[int]*Entry)
+	newAllEntries := make([]*Entry, 0, 1024)
+	for _, prize := range prizes {
+		prize.Winners = make([]*Result, 0)
+	}
+	r.ParseForm()
+	// load the new entries
+	for row := 0; ; row++ {
+		rowString := strconv.Itoa(row) + "."
+		entry := &Entry{Bib: -1}
+		entry.Optional = make([]string, 0)
+		entry.Fname = r.FormValue(rowString + "Fname")
+		entry.Lname = r.FormValue(rowString + "Lname")
+		tmpAge, _ := strconv.Atoi(r.FormValue(rowString + "Age"))
+		entry.Age = uint(tmpAge)
+		entry.Male = (r.FormValue(rowString+"Male") == "M")
+		entry.Bib, _ = strconv.Atoi(r.FormValue(rowString + "Bib"))
+		for _, opt := range optionalEntryFields {
+			entry.Optional = append(entry.Optional, r.FormValue(rowString+opt))
+		}
+		if entry.Bib >= 0 {
+			if _, ok := newBibbedEntries[entry.Bib]; ok {
+				showErrorForAdmin(w, r.Referer(), fmt.Sprintf("Cannot assign bib #%d to multiple runners.", entry.Bib))
+				return
+			}
+			newBibbedEntries[entry.Bib] = entry
+		}
+		newAllEntries = append(newAllEntries, entry)
+	}
+	// no issues/errors, load the data
+	bibbedEntries = newBibbedEntries
+	allEntries = newAllEntries
+	recomputeAllPrizes()
+	http.Redirect(w, r, "/audit", 301)
+}
+
 func startHandler(w http.ResponseWriter, r *http.Request) {
 	raceStart = time.Now()
 	raceHasStarted = true
@@ -335,26 +381,27 @@ func startHandler(w http.ResponseWriter, r *http.Request) {
 
 func linkBib(w http.ResponseWriter, r *http.Request) {
 	if !raceHasStarted {
-		showErrorForAdmin(w, "Cannot link a bib, the race hasn't started!")
+		showErrorForAdmin(w, r.Referer(), "Cannot link a bib, the race hasn't started!")
 		return
 	}
 	removeBib := r.FormValue("remove") == "true"
 	bib, err := strconv.Atoi(r.FormValue("bib"))
 	if err != nil {
-		showErrorForAdmin(w, "Error %s getting bib number", err)
+		showErrorForAdmin(w, r.Referer(), "Error %s getting bib number", err)
 		return
 	}
 	if bib < 0 {
-		showErrorForAdmin(w, "Cannot assign a negative bib number of %d", bib)
+		showErrorForAdmin(w, r.Referer(), "Cannot assign a negative bib number of %d", bib)
 		return
 	}
 	deltaT := HumanDuration(time.Since(raceStart))
 	mutex.Lock()
 	defer mutex.Unlock()
+	auditClean = false
 	auditLog = append(auditLog, Audit{Time: deltaT, Bib: bib, Remove: removeBib})
 	entry, ok := bibbedEntries[bib]
 	if !ok {
-		showErrorForAdmin(w, "Bib number %d was not assigned to anyone.", bib)
+		showErrorForAdmin(w, r.Referer(), "Bib number %d was not assigned to anyone.", bib)
 		return
 	}
 	if removeBib {
@@ -369,7 +416,7 @@ func linkBib(w http.ResponseWriter, r *http.Request) {
 		if index >= len(results) {
 			// something's out of whack here -- The Entry has a Result but the Result isn't in the results slice
 			// the fix is removing the entry's result which happens before this if statement
-			showErrorForAdmin(w, "Bib has a result recorded but is not in the results table! - attempted to fix it")
+			showErrorForAdmin(w, r.Referer(), "Bib has a result recorded but is not in the results table! - attempted to fix it")
 			return
 		}
 		results = append(results[:index], results[index+1:]...)
@@ -385,7 +432,7 @@ func linkBib(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/admin", 301)
 			return
 		}
-		showErrorForAdmin(w, "Bib number %d already confirmed for place #%d", bib, entry.Result.Place)
+		showErrorForAdmin(w, r.Referer(), "Bib number %d already confirmed for place #%d", bib, entry.Result.Place)
 		return
 	}
 	result := &Result{
@@ -424,7 +471,7 @@ func linkBib(w http.ResponseWriter, r *http.Request) {
 	}(entry.Fname, entry.Lname, emailAddr, result.Time)
 }
 
-func showErrorForAdmin(w http.ResponseWriter, message string, args ...interface{}) {
+func showErrorForAdmin(w http.ResponseWriter, message string, referrer string, args ...interface{}) {
 	w.WriteHeader(409) // conflict header, most likely due to old information in the client
 	msg := fmt.Sprintf(message, args...)
 	log.Println(msg)
@@ -432,7 +479,7 @@ func showErrorForAdmin(w http.ResponseWriter, message string, args ...interface{
 		fmt.Fprintf(w, msg)
 		return
 	}
-	err := errorTemplate.Execute(w, msg)
+	err := errorTemplate.Execute(w, map[string]interface{}{"Message": message, "Referrer": referrer})
 	if err != nil {
 		fmt.Fprintf(w, "Error executing template - %s", err)
 	}
@@ -455,12 +502,12 @@ func recomputeAllPrizes() {
 func assignBib(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.FormValue("id"))
 	if err != nil {
-		showErrorForAdmin(w, "Error %s getting next", err)
+		showErrorForAdmin(w, r.Referer(), r.Referer(), "Error %s getting next", err)
 		return
 	}
 	bib, err := strconv.Atoi(r.FormValue("bib"))
 	if bib < 0 || err != nil {
-		showErrorForAdmin(w, "Could not get a valid bib number from %s", r.FormValue("bib"))
+		showErrorForAdmin(w, r.Referer(), r.Referer(), "Could not get a valid bib number from %s", r.FormValue("bib"))
 		return
 	}
 	mutex.Lock()
@@ -469,14 +516,14 @@ func assignBib(w http.ResponseWriter, r *http.Request) {
 	if len(allEntries) > id {
 		entry := allEntries[id]
 		if _, ok := bibbedEntries[bib]; ok {
-			showErrorForAdmin(w, "Bib # %d already assigned to %s %s!", bib, bibbedEntries[bib].Fname, bibbedEntries[bib].Lname)
+			showErrorForAdmin(w, r.Referer(), r.Referer(), "Bib # %d already assigned to %s %s!", bib, bibbedEntries[bib].Fname, bibbedEntries[bib].Lname)
 			return
 		}
 		entry.Bib = bib
 		log.Printf("Set bib for %s %s to %d", entry.Fname, entry.Lname, bib)
 		bibbedEntries[entry.Bib] = entry
 	} else {
-		showErrorForAdmin(w, "Id %d was not assigned to anyone.", id)
+		showErrorForAdmin(w, r.Referer(), r.Referer(), "Id %d was not assigned to anyone.", id)
 		return
 	}
 	http.Redirect(w, r, "/admin", 301)
@@ -487,21 +534,21 @@ func addEntry(w http.ResponseWriter, r *http.Request) {
 	entry := &Entry{}
 	age, err := strconv.Atoi(r.FormValue("Age"))
 	if age < 0 {
-		showErrorForAdmin(w, "Not a valid age, must be >= 0")
+		showErrorForAdmin(w, r.Referer(), r.Referer(), "Not a valid age, must be >= 0")
 		return
 	}
 	if err != nil {
-		showErrorForAdmin(w, "Error %s getting Age", err)
+		showErrorForAdmin(w, r.Referer(), r.Referer(), "Error %s getting Age", err)
 		return
 	}
 	entry.Age = uint(age)
 	entry.Bib, err = strconv.Atoi(r.FormValue("Bib"))
 	if entry.Bib < 0 {
-		showErrorForAdmin(w, "Not a valid bib, must be >= 0")
+		showErrorForAdmin(w, r.Referer(), r.Referer(), "Not a valid bib, must be >= 0")
 		return
 	}
 	if err != nil {
-		showErrorForAdmin(w, "Error %s getting Bib", err)
+		showErrorForAdmin(w, r.Referer(), r.Referer(), "Error %s getting Bib", err)
 		return
 	}
 	entry.Fname = r.FormValue("Fname")
@@ -510,6 +557,7 @@ func addEntry(w http.ResponseWriter, r *http.Request) {
 	entry.Optional = make([]string, 0)
 	mutex.Lock()
 	defer mutex.Unlock()
+	auditClean = false
 	for _, s := range optionalEntryFields {
 		entry.Optional = append(entry.Optional, r.FormValue(s))
 	}
@@ -536,11 +584,6 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	default:
 		name = "default"
 	case "admin":
-		data["Admin"] = true
-		if len(allEntries) > 0 {
-			data["Entries"] = allEntries
-		}
-		data["Fields"] = optionalEntryFields
 		recentRacers := make([]*Result, 0, len(results))
 		end := len(results)
 		for {
@@ -554,6 +597,15 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		data["RecentRacers"] = recentRacers
+		fallthrough
+	case "audit":
+		data["Admin"] = true
+		data["Audit"] = auditLog
+		auditClean = true
+		if len(allEntries) > 0 {
+			data["Entries"] = allEntries
+		}
+		data["Fields"] = optionalEntryFields
 	case "results":
 		recentRacers := make([]*Result, 0, len(results))
 		end := len(results)
@@ -565,9 +617,6 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			recentRacers = append(recentRacers, results[end])
 		}
 		data["RecentRacers"] = recentRacers
-	case "audit":
-		data["Admin"] = true
-		data["Audit"] = auditLog
 	}
 	if raceHasStarted {
 		diff := time.Since(raceStart)
@@ -644,6 +693,7 @@ func main() {
 	http.HandleFunc(config.webserverHostname+"/download", download)
 	http.HandleFunc(config.webserverHostname+"/uploadRacers", uploadRacers)
 	http.HandleFunc(config.webserverHostname+"/uploadPrizes", uploadPrizes)
+	http.HandleFunc(config.webserverHostname+"/auditPost", auditPost)
 	http.Handle(config.webserverHostname+"/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static/"))))
 	http.Handle(config.webserverHostname+"/fonts/", http.StripPrefix("/fonts/", http.FileServer(http.Dir("fonts/"))))
 	http.Handle("/", http.RedirectHandler("http://"+config.webserverHostname+"/", 307))

@@ -190,6 +190,44 @@
 					</tr>
 				{{end}}
 			</table>
+			<form role="form" action="auditPost" method="post">
+				<table class="table table-bordered table-condensed">
+					<tr>
+						<th>Place</th>
+						<th>Time</th>
+						<th>Bib</th>
+						<th>First</th>
+						<th>Last</th>
+						<th>Age</th>
+						<th>Gender</th>
+						{{range .Fields}}
+							<th>{{.}}</th>
+						{{end}}
+					</tr>
+					<tbody>
+					{{range $id , $entries := .Entries}}
+						<tr>
+							{{if $entries.Result}}
+								<td>{{$entries.Result.Place}}</td>
+								<td><input class="form-control" type="text" name="{{$id}}.Time" value="{{$entries.Result.Time}}"></td>
+							{{else}}
+								<td>-</td>
+								<td>-</td>
+							{{end}}
+							<td><input class="form-control" type="number" name="{{$id}}.Bib" value="{{$entries.Bib}}"></td>
+							<td><input class="form-control" type="text" name="{{$id}}.Fname" value="{{$entries.Fname}}"></td>
+							<td><input class="form-control" type="text" name="{{$id}}.Lname" value="{{$entries.Lname}}"></td>
+							<td><input class="form-control" type="number" name="{{$id}}.Age" value="{{$entries.Age}}"></td>
+							<td><input class="form-control" type="text" name="{{$id}}.Gender" value="{{if $entries.Male}}M{{else}}F{{end}}"></td>
+							{{range $idx, $opts := $entries.Optional}}
+								<td><input class="form-control" type="text" name="{{$id}}.{{index $.Fields $idx}}" value="{{index $entries.Optional $idx}}"></td>
+							{{end}}
+						</tr>
+					{{end}}
+					</tbody>
+				</table>
+				<button class="btn btn-default" type="submit">Save</button>
+			</form>
 		</div>
 	</body>
 </html>

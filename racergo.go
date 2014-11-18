@@ -28,8 +28,8 @@ var startRaceChan chan time.Time
 var raceHasStarted bool = false
 var raceStart time.Time
 var optionalEntryFields []string
-var bibbedEntries map[int]*Entry   // map of Bib #s
-var unbibbedEntries map[int]*Entry // map of sequential Ids
+var bibbedEntries map[int]*Entry // map of Bib #s pointing to bibbed entries only
+var allEntries []*Entry          // slice of all Entries, bibbed and unbibbed
 var results []*Result
 var auditLog []Audit
 var raceResultsTemplate *template.Template
@@ -133,7 +133,7 @@ func download(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-type", "application/csv")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
 	mutex.Lock()
-	length := len(unbibbedEntries)
+	length := len(allEntries)
 	if length > len(results) {
 		length = len(results)
 	}
@@ -148,14 +148,12 @@ func download(w http.ResponseWriter, r *http.Request) {
 			csvData = append(csvData, append([]string{result.Entry.Fname, result.Entry.Lname, strconv.Itoa(int(result.Entry.Age)), gender(result.Entry.Male), strconv.Itoa(int(result.Entry.Bib)), strconv.Itoa(int(result.Place)), result.Time.String()}, result.Entry.Optional...))
 		}
 	}
-	for _, entry := range unbibbedEntries {
-		csvData = append(csvData, append([]string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), gender(entry.Male), "", "", ""}, entry.Optional...))
-	}
-	for _, entry := range bibbedEntries {
+	for _, entry := range allEntries {
 		if entry.Result != nil {
-			continue // already included in results export
+			csvData = append(csvData, append([]string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), gender(entry.Male), "", "", ""}, entry.Optional...))
+		} else {
+			csvData = append(csvData, append([]string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), gender(entry.Male), strconv.Itoa(entry.Bib), "", ""}, entry.Optional...))
 		}
-		csvData = append(csvData, append([]string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), gender(entry.Male), strconv.Itoa(entry.Bib), "", ""}, entry.Optional...))
 	}
 	mutex.Unlock()
 	writer := csv.NewWriter(w)
@@ -257,9 +255,10 @@ func uploadRacers(w http.ResponseWriter, r *http.Request) {
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	// make the maps and unlink all previous relationships
+	auditClean = false
+	// make the in-memory data stores and unlink all previous relationships
 	bibbedEntries = make(map[int]*Entry)
-	unbibbedEntries = make(map[int]*Entry)
+	allEntries = make([]*Entry, 0, 1024)
 	for _, prize := range prizes {
 		prize.Winners = make([]*Result, 0)
 	}
@@ -303,11 +302,10 @@ func uploadRacers(w http.ResponseWriter, r *http.Request) {
 				entry.Optional = append(entry.Optional, rawEntries[row][col])
 			}
 		}
-		if entry.Bib < 0 {
-			unbibbedEntries[row] = entry
-		} else {
+		if entry.Bib >= 0 {
 			bibbedEntries[entry.Bib] = entry
 		}
+		allEntries = append(allEntries, entry)
 	}
 	emailIndex = -1
 	if config.sendgriduser == SENDGRIDUSER || config.sendgridpass == SENDGRIDPASS {
@@ -468,14 +466,14 @@ func assignBib(w http.ResponseWriter, r *http.Request) {
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	if entry, ok := unbibbedEntries[id]; ok {
-		if _, ok = bibbedEntries[bib]; ok {
+	if len(allEntries) > id {
+		entry := allEntries[id]
+		if _, ok := bibbedEntries[bib]; ok {
 			showErrorForAdmin(w, "Bib # %d already assigned to %s %s!", bib, bibbedEntries[bib].Fname, bibbedEntries[bib].Lname)
 			return
 		}
 		entry.Bib = bib
 		log.Printf("Set bib for %s %s to %d", entry.Fname, entry.Lname, bib)
-		delete(unbibbedEntries, id)
 		bibbedEntries[entry.Bib] = entry
 	} else {
 		showErrorForAdmin(w, "Id %d was not assigned to anyone.", id)
@@ -519,6 +517,7 @@ func addEntry(w http.ResponseWriter, r *http.Request) {
 		bibbedEntries = make(map[int]*Entry)
 	}
 	bibbedEntries[entry.Bib] = entry
+	allEntries = append(allEntries, entry)
 	log.Printf("Added Entry - %#v\n", entry)
 	http.Redirect(w, r, "/admin", 301)
 	return
@@ -538,8 +537,8 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		name = "default"
 	case "admin":
 		data["Admin"] = true
-		if len(unbibbedEntries) > 0 {
-			data["Unbibbed"] = unbibbedEntries
+		if len(allEntries) > 0 {
+			data["Entries"] = allEntries
 		}
 		data["Fields"] = optionalEntryFields
 		recentRacers := make([]*Result, 0, len(results))

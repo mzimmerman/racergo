@@ -319,46 +319,48 @@
 			{{template "downloadResults"}}
 		</div>
 		<div class="col-md-12">
-		{{if .Unbibbed}}
-			<div class="container-fluid">
-				<table class="table table-bordered table-condensed">
-					<tr>
-						<th>Assign Bib</th>
-						<th>First</th>
-						<th>Last</th>
-						<th>Age</th>
-						<th>Gender</th>
-						{{range .Fields}}
-							<th>{{.}}</th>
-						{{end}}
-					</tr>
-					<tbody>
-					{{range $id , $unbibbed := .Unbibbed}}
+			<table class="table table-bordered table-condensed">
+				<tr>
+					<th>Bib</th>
+					<th>First</th>
+					<th>Last</th>
+					<th>Age</th>
+					<th>Gender</th>
+					{{range .Fields}}
+						<th>{{.}}</th>
+					{{end}}
+				</tr>
+				<tbody>
+					{{range $id , $entries := .Entries}}
 						<tr>
 							<td>
-								<form class="inline-form" role="form" action="assignBib" method="post">
-								<input type="hidden" name="id" value="{{$id}}">
-									<div class="form-group">
-										<div class="col-md-6">
-											<input class="form-control " type="number" name="bib" required="required" placeholder="Bib #">
+								{{if lt $entries.Bib 0}}
+									<form class="inline-form" role="form" action="assignBib" method="post">
+										<input type="hidden" name="id" value="{{$id}}">
+										<div class="form-group">
+											<div class="col-md-6">
+												<input class="form-control " type="number" name="bib" required="required" placeholder="Bib #">
+											</div>
 										</div>
-									</div>
-									<button class="btn btn-default" type="submit">Set</button>
-								</form>
+										<button class="btn btn-default" type="submit">Set</button>
+									</form>
+								{{else}}
+									{{$entries.Bib}}
+								{{end}}
 							</td>
-							<td>{{$unbibbed.Fname}}</td>
-							<td>{{$unbibbed.Lname}}</td>
-							<td>{{$unbibbed.Age}}</td>
-							<td>{{if $unbibbed.Male}}M{{else}}F{{end}}</td>
-							{{range $unbibbed.Optional}}
+							<td>{{$entries.Fname}}</td>
+							<td>{{$entries.Lname}}</td>
+							<td>{{$entries.Age}}</td>
+							<td>{{if $entries.Male}}M{{else}}F{{end}}</td>
+							{{range $entries.Optional}}
 								<td>{{.}}</td>
 							{{end}}
 						</tr>
+						
 					{{end}}
-					</tbody>
-				</table>
-			</div>
-		{{end}}
+				</tbody>
+			</table>
+		</div>
 	</body>
 </html>
 {{end}}

@@ -34,8 +34,8 @@ func TestLoadRacers(t *testing.T) {
 	if len(bibbedEntries) != 8 {
 		t.Errorf("Expected 8 bibbed entries, got %d", len(bibbedEntries))
 	}
-	if len(unbibbedEntries) != 0 {
-		t.Errorf("Expected 0 unbibbed entries, got %d", len(unbibbedEntries))
+	if len(allEntries) != 8 {
+		t.Errorf("Expected 8 total entries, got %d", len(allEntries))
 	}
 	if bibbedEntries[4].Fname != "G" || bibbedEntries[4].Lname != "H" {
 		t.Errorf("Expected G H as 4th indexed entry, got %s %s", bibbedEntries[4].Fname, bibbedEntries[4].Lname)
@@ -58,8 +58,8 @@ func TestLoadRacers(t *testing.T) {
 	if len(bibbedEntries) != 4 {
 		t.Errorf("Expected 4 bibbed entries, got %d", len(bibbedEntries))
 	}
-	if len(unbibbedEntries) != 4 {
-		t.Errorf("Expected 4 unbibbed entries, got %d", len(unbibbedEntries))
+	if len(allEntries) != 8 {
+		t.Errorf("Expected 8 entries, got %d", len(allEntries))
 	}
 	mutex.Unlock()
 	req, err = uploadFile("test_runners3.csv")
@@ -78,8 +78,8 @@ func TestLoadRacers(t *testing.T) {
 	if len(bibbedEntries) != 0 {
 		t.Errorf("Expected 0 bibbed entries, got %d", len(bibbedEntries))
 	}
-	if len(unbibbedEntries) != 8 {
-		t.Errorf("Expected 8 unbibbed entries, got %d", len(unbibbedEntries))
+	if len(allEntries) != 8 {
+		t.Errorf("Expected 8 entries, got %d", len(allEntries))
 	}
 	mutex.Unlock()
 }

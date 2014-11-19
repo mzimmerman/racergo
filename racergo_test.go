@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strconv"
 	"testing"
 	"time"
@@ -269,35 +270,67 @@ func EqualResult(t *testing.T, got, expected *Result) {
 	}
 }
 
-func EqualString(t *testing.T, got, expected string) {
-	if got != expected {
-		t.Errorf("Expected %s, got %s", expected, got)
+func TestSortResults(t *testing.T) {
+	results := []*Result{
+		{Time: HumanDuration(time.Second)},
+		{Time: HumanDuration(time.Minute)},
+		{Time: HumanDuration(time.Hour)},
+	}
+	sort.Sort((*ResultSort)(&results))
+	if results[0].Time != HumanDuration(time.Second) {
+		t.Error()
+	}
+	if results[1].Time != HumanDuration(time.Minute) {
+		t.Error()
+	}
+	if results[2].Time != HumanDuration(time.Hour) {
+		t.Error()
+	}
+	results = []*Result{
+		{Time: HumanDuration(time.Minute)},
+		{Time: HumanDuration(time.Second)},
+		{Time: HumanDuration(time.Hour)},
+	}
+	sort.Sort((*ResultSort)(&results))
+	if results[0].Time != HumanDuration(time.Second) {
+		t.Error()
+	}
+	if results[1].Time != HumanDuration(time.Minute) {
+		t.Error()
+	}
+	if results[2].Time != HumanDuration(time.Hour) {
+		t.Error()
 	}
 }
 
 func TestHumanDuration(t *testing.T) {
-	duration := HumanDuration(time.Second * 120)
-	EqualString(t, duration.String(), "00:02:00.00")
-	EqualString(t, duration.Clock(), "00:02:00")
-	duration = HumanDuration(time.Second * 0)
-	EqualString(t, duration.String(), "00:00:00.00")
-	EqualString(t, duration.Clock(), "00:00:00")
-	duration = HumanDuration(time.Hour)
-	EqualString(t, duration.String(), "01:00:00.00")
-	EqualString(t, duration.Clock(), "01:00:00")
-	duration = HumanDuration(time.Second * 5)
-	EqualString(t, duration.String(), "00:00:05.00")
-	EqualString(t, duration.Clock(), "00:00:05")
-	duration = HumanDuration(time.Second * 50)
-	EqualString(t, duration.String(), "00:00:50.00")
-	EqualString(t, duration.Clock(), "00:00:50")
-	duration = HumanDuration(time.Hour + time.Minute*45 + time.Second*5)
-	EqualString(t, duration.String(), "01:45:05.00")
-	EqualString(t, duration.Clock(), "01:45:05")
-	duration = HumanDuration(time.Hour + time.Minute*45 + time.Second*5 + time.Millisecond*104)
-	EqualString(t, duration.String(), "01:45:05.10")
-	EqualString(t, duration.Clock(), "01:45:05")
-	duration = HumanDuration(time.Hour + time.Minute*45 + time.Second*5 + time.Millisecond*907)
-	EqualString(t, duration.String(), "01:45:05.91")
-	EqualString(t, duration.Clock(), "01:45:05")
+	tests := []struct {
+		duration HumanDuration
+		time     string
+		clock    string
+	}{
+		{HumanDuration(time.Second * 120), "00:02:00.00", "00:02:00"},
+		{HumanDuration(time.Second * 0), "00:00:00.00", "00:00:00"},
+		{HumanDuration(time.Hour), "01:00:00.00", "01:00:00"},
+		{HumanDuration(time.Second * 5), "00:00:05.00", "00:00:05"},
+		{HumanDuration(time.Second * 50), "00:00:50.00", "00:00:50"},
+		{HumanDuration(time.Hour + time.Minute*45 + time.Second*5), "01:45:05.00", "01:45:05"},
+		{HumanDuration(time.Hour + time.Minute*45 + time.Second*5 + time.Millisecond*104), "01:45:05.10", "01:45:05"},
+		{HumanDuration(time.Hour + time.Minute*45 + time.Second*5 + time.Millisecond*907), "01:45:05.91", "01:45:05"},
+	}
+	for _, val := range tests {
+		if val.duration.String() != val.time {
+			t.Errorf("Expected %s, got %d", val.time, val.duration.String())
+		}
+		if val.duration.Clock() != val.clock {
+			t.Errorf("Expected %s, got %d", val.time, val.duration.String())
+		}
+		newDuration, err := ParseHumanDuration(val.time)
+		if err != nil {
+			t.Errorf("Unexpected error - %v", err)
+		}
+		if newDuration-val.duration >= HumanDuration(time.Millisecond*10) { // rounding errors are okay
+			t.Errorf("Expected %s, got %s", val.duration, newDuration)
+		}
+	}
 }

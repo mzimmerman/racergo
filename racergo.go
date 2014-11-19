@@ -15,6 +15,7 @@ import (
 	"net/mail"
 	"os"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -119,6 +120,20 @@ type Result struct {
 	Confirmed bool
 }
 
+type ResultSort []*Result
+
+func (rs *ResultSort) Len() int {
+	return len(*rs)
+}
+
+func (rs *ResultSort) Less(i, j int) bool {
+	return (*rs)[i].Time < (*rs)[j].Time
+}
+
+func (rs *ResultSort) Swap(i, j int) {
+	(*rs)[i], (*rs)[j] = (*rs)[j], (*rs)[i]
+}
+
 func (hd HumanDuration) String() string {
 	seconds := time.Duration(hd).Seconds()
 	seconds -= float64(time.Duration(hd) / time.Minute * 60)
@@ -127,6 +142,36 @@ func (hd HumanDuration) String() string {
 
 func (hd HumanDuration) Clock() string {
 	return fmt.Sprintf("%#02d:%#02d:%02d", time.Duration(hd)/time.Hour, time.Duration(hd)/time.Minute%60, time.Duration(hd)/time.Second%60)
+}
+
+func ParseHumanDuration(val string) (HumanDuration, error) {
+	var duration HumanDuration
+	str := strings.Split(val, ":")
+	if len(str) < 3 {
+		return duration, fmt.Errorf("%s is not a valid race duration, must have two semicolons", val)
+	}
+	secs := strings.Split(str[2], ".")
+	if len(secs) < 2 {
+		return duration, fmt.Errorf("%s does not contain a valid seconds time, must have a decimal place", val)
+	}
+	hours, err := strconv.Atoi(str[0])
+	if err != nil {
+		return duration, fmt.Errorf("Error parsing hours - %s - %v", str[0], err)
+	}
+	minutes, err := strconv.Atoi(str[1])
+	if err != nil {
+		return duration, fmt.Errorf("Error parsing minutes - %s - %v", str[1], err)
+	}
+	seconds, err := strconv.Atoi(secs[0])
+	if err != nil {
+		return duration, fmt.Errorf("Error parsing seconds - %s - %v", secs[0], err)
+	}
+	hundredths, err := strconv.Atoi(secs[1])
+	if err != nil {
+		return duration, fmt.Errorf("Error parsing hundredths - %s - %v", secs[1], err)
+	}
+	duration = HumanDuration((time.Hour * time.Duration(hours)) + (time.Minute * time.Duration(minutes)) + (time.Second * time.Duration(seconds)) + (time.Millisecond * 10 * time.Duration(hundredths)))
+	return duration, nil
 }
 
 func download(w http.ResponseWriter, r *http.Request) {
@@ -338,10 +383,12 @@ func auditPost(w http.ResponseWriter, r *http.Request) {
 	// wipe the in-memory data stores
 	newBibbedEntries := make(map[int]*Entry)
 	newAllEntries := make([]*Entry, 0, 1024)
+	newResults := make([]*Result, 0, 1024)
 	for _, prize := range prizes {
 		prize.Winners = make([]*Result, 0)
 	}
 	r.ParseForm()
+	var err error
 	// load the new entries
 	for row := 0; ; row++ {
 		rowString := strconv.Itoa(row) + "."
@@ -352,7 +399,24 @@ func auditPost(w http.ResponseWriter, r *http.Request) {
 		tmpAge, _ := strconv.Atoi(r.FormValue(rowString + "Age"))
 		entry.Age = uint(tmpAge)
 		entry.Male = (r.FormValue(rowString+"Male") == "M")
-		entry.Bib, _ = strconv.Atoi(r.FormValue(rowString + "Bib"))
+		entry.Bib, err = strconv.Atoi(r.FormValue(rowString + "Bib"))
+		if err != nil {
+			entry.Bib = -1
+		}
+		if entry.Fname == "" && entry.Lname == "" && entry.Age == 0 && entry.Bib == -1 {
+			break // this one has all default/empty values, must be the end of the records found
+		}
+		duration, err := ParseHumanDuration(r.FormValue(rowString + "Time"))
+		if err != nil {
+			fmt.Printf("Unable to parse duration - %v\n", err)
+		} else {
+			entry.Result = &Result{
+				Time:      duration,
+				Confirmed: true,
+				Entry:     entry,
+			}
+			newResults = append(newResults, entry.Result)
+		}
 		for _, opt := range optionalEntryFields {
 			entry.Optional = append(entry.Optional, r.FormValue(rowString+opt))
 		}
@@ -368,6 +432,12 @@ func auditPost(w http.ResponseWriter, r *http.Request) {
 	// no issues/errors, load the data
 	bibbedEntries = newBibbedEntries
 	allEntries = newAllEntries
+	// now rebuild results
+	sort.Sort((*ResultSort)(&newResults))
+	for x := range newResults {
+		newResults[x].Place = uint(x + 1)
+	}
+	results = newResults
 	recomputeAllPrizes()
 	http.Redirect(w, r, "/audit", 301)
 }
@@ -455,23 +525,28 @@ func linkBib(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Error parsing e-mail address of %s\n", emailAddr)
 		return
 	}
-	go func(fname, lname, email string, time HumanDuration) {
+	go func(fname, lname, email string, hd HumanDuration) {
 		m := sendgrid.NewMail()
 		client := sendgrid.NewSendGridClient(config.sendgriduser, config.sendgridpass)
 		m.AddTo(fmt.Sprintf("%s %s <%s>", fname, lname, email))
 		m.SetSubject(fmt.Sprintf("%s Results", config.raceName))
-		m.SetText(fmt.Sprintf("Congratulations %s %s!  You finished the %s in %s!", fname, lname, config.raceName, time))
+		m.SetText(fmt.Sprintf("Congratulations %s %s!  You finished the %s in %s!", fname, lname, config.raceName, hd))
 		m.SetFrom(config.emailFrom)
-		err := client.Send(m)
-		if err != nil {
-			log.Printf("Error sending mail to %s - %v", email, err)
-		} else {
-			log.Printf("Success sending %#v", m)
+		backoff := time.Second
+		for {
+			err := client.Send(m)
+			if err == nil {
+				log.Printf("Success sending %#v", m)
+				return
+			}
+			backoff = backoff * 2
+			log.Printf("Error sending mail to %s - %v, trying again in %s", email, err, backoff)
+
 		}
 	}(entry.Fname, entry.Lname, emailAddr, result.Time)
 }
 
-func showErrorForAdmin(w http.ResponseWriter, message string, referrer string, args ...interface{}) {
+func showErrorForAdmin(w http.ResponseWriter, referrer string, message string, args ...interface{}) {
 	w.WriteHeader(409) // conflict header, most likely due to old information in the client
 	msg := fmt.Sprintf(message, args...)
 	log.Println(msg)
@@ -479,7 +554,7 @@ func showErrorForAdmin(w http.ResponseWriter, message string, referrer string, a
 		fmt.Fprintf(w, msg)
 		return
 	}
-	err := errorTemplate.Execute(w, map[string]interface{}{"Message": message, "Referrer": referrer})
+	err := errorTemplate.Execute(w, map[string]interface{}{"Message": msg, "Referrer": referrer})
 	if err != nil {
 		fmt.Fprintf(w, "Error executing template - %s", err)
 	}
@@ -507,7 +582,7 @@ func assignBib(w http.ResponseWriter, r *http.Request) {
 	}
 	bib, err := strconv.Atoi(r.FormValue("bib"))
 	if bib < 0 || err != nil {
-		showErrorForAdmin(w, r.Referer(), r.Referer(), "Could not get a valid bib number from %s", r.FormValue("bib"))
+		showErrorForAdmin(w, r.Referer(), "Could not get a valid bib number from %s", r.FormValue("bib"))
 		return
 	}
 	mutex.Lock()
@@ -516,14 +591,14 @@ func assignBib(w http.ResponseWriter, r *http.Request) {
 	if len(allEntries) > id {
 		entry := allEntries[id]
 		if _, ok := bibbedEntries[bib]; ok {
-			showErrorForAdmin(w, r.Referer(), r.Referer(), "Bib # %d already assigned to %s %s!", bib, bibbedEntries[bib].Fname, bibbedEntries[bib].Lname)
+			showErrorForAdmin(w, r.Referer(), "Bib # %d already assigned to %s %s!", bib, bibbedEntries[bib].Fname, bibbedEntries[bib].Lname)
 			return
 		}
 		entry.Bib = bib
 		log.Printf("Set bib for %s %s to %d", entry.Fname, entry.Lname, bib)
 		bibbedEntries[entry.Bib] = entry
 	} else {
-		showErrorForAdmin(w, r.Referer(), r.Referer(), "Id %d was not assigned to anyone.", id)
+		showErrorForAdmin(w, r.Referer(), "Id %d was not assigned to anyone.", id)
 		return
 	}
 	http.Redirect(w, r, "/admin", 301)
@@ -534,21 +609,21 @@ func addEntry(w http.ResponseWriter, r *http.Request) {
 	entry := &Entry{}
 	age, err := strconv.Atoi(r.FormValue("Age"))
 	if age < 0 {
-		showErrorForAdmin(w, r.Referer(), r.Referer(), "Not a valid age, must be >= 0")
+		showErrorForAdmin(w, r.Referer(), "Not a valid age, must be >= 0")
 		return
 	}
 	if err != nil {
-		showErrorForAdmin(w, r.Referer(), r.Referer(), "Error %s getting Age", err)
+		showErrorForAdmin(w, r.Referer(), "Error %s getting Age", err)
 		return
 	}
 	entry.Age = uint(age)
 	entry.Bib, err = strconv.Atoi(r.FormValue("Bib"))
 	if entry.Bib < 0 {
-		showErrorForAdmin(w, r.Referer(), r.Referer(), "Not a valid bib, must be >= 0")
+		showErrorForAdmin(w, r.Referer(), "Not a valid bib, must be >= 0")
 		return
 	}
 	if err != nil {
-		showErrorForAdmin(w, r.Referer(), r.Referer(), "Error %s getting Bib", err)
+		showErrorForAdmin(w, r.Referer(), "Error %s getting Bib", err)
 		return
 	}
 	entry.Fname = r.FormValue("Fname")

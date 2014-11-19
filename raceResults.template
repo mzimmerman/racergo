@@ -218,7 +218,7 @@
 							<td><input class="form-control" type="text" name="{{$id}}.Fname" value="{{$entries.Fname}}"></td>
 							<td><input class="form-control" type="text" name="{{$id}}.Lname" value="{{$entries.Lname}}"></td>
 							<td><input class="form-control" type="number" name="{{$id}}.Age" value="{{$entries.Age}}"></td>
-							<td><input class="form-control" type="text" name="{{$id}}.Gender" value="{{if $entries.Male}}M{{else}}F{{end}}"></td>
+							<td><input class="form-control" type="text" name="{{$id}}.Male" value="{{if $entries.Male}}M{{else}}F{{end}}"></td>
 							{{range $idx, $opts := $entries.Optional}}
 								<td><input class="form-control" type="text" name="{{$id}}.{{index $.Fields $idx}}" value="{{index $entries.Optional $idx}}"></td>
 							{{end}}
@@ -394,7 +394,7 @@
 								<td>{{.}}</td>
 							{{end}}
 						</tr>
-						
+
 					{{end}}
 				</tbody>
 			</table>

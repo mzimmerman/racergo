@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sort"
 	"strconv"
 	"testing"
@@ -14,6 +15,49 @@ func startRace() {
 	r, _ := http.NewRequest("get", "/start", nil)
 	w := httptest.NewRecorder()
 	startHandler(w, r)
+}
+
+func addTestEntry(t *testing.T, e *Entry) {
+	values := make(url.Values)
+	values.Add("Bib", strconv.Itoa(e.Bib))
+	values.Add("Age", strconv.Itoa(int(e.Age)))
+	values.Add("Fname", e.Fname)
+	values.Add("Lname", e.Lname)
+	values.Add("Male", strconv.FormatBool(e.Male))
+	for x, o := range e.Optional {
+		values.Add(optionalEntryFields[x], o)
+	}
+	r, err := http.NewRequest("GET", "/addEntry?"+values.Encode(), nil)
+	if err != nil {
+		t.Fatalf("Error creating request - %v", err)
+	}
+	w := httptest.NewRecorder()
+	addEntry(w, r)
+	if w.Code != http.StatusMovedPermanently {
+		t.Errorf("Wrong status received on add entry - %v, got %d, %s", *e, w.Code, w.Body.String())
+	}
+}
+
+func TestDownloadAndAudit(t *testing.T) {
+	optionalEntryFields = []string{"Email", "Large"}
+	users := []struct {
+		e Entry
+		r Result
+	}{
+		{Entry{1, "A", "B", true, 15, []string{"userA@host.com", "Large"}, nil}, Result{HumanDuration(time.Second), 1, nil, true}},
+		{Entry{2, "C", "D", false, 25, []string{"userC@host.com", "Medium"}, nil}, Result{HumanDuration(time.Minute), 1, nil, true}},
+		{Entry{3, "E", "F", true, 30, []string{"userE@host.com", "Small"}, nil}, Result{HumanDuration(time.Hour), 1, nil, true}},
+		{Entry{4, "G", "H", false, 35, []string{"userG@host.com", "XSmall"}, nil}, Result{HumanDuration(time.Millisecond), 1, nil, true}},
+	}
+	for _, u := range users {
+		addTestEntry(t, &u.e)
+	}
+	r, _ := http.NewRequest("GET", "/download", nil)
+	w := httptest.NewRecorder()
+	download(w, r)
+	// TODO: validate downloaded file
+	// TODO: link bibs, validate
+	// TODO: change results through audit post, validate
 }
 
 func TestLoadRacers(t *testing.T) {

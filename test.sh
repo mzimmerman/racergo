@@ -3,7 +3,7 @@ export RACERGOHOSTNAME="campuslife5k"
 #export RACERGOSENDGRIDUSER="mysendgridusername"
 #export RACERGOSENDGRIDPASS="mysendgridpassword"
 export RACERGORACENAME="2014 Campus Life 5k Orchard Run"
-export RACERGOEMAILFIELD="Email"
+export RACERGOEMAILFIELD="Emailcurrentlydisabled"
 export RACERGOFROMEMAIL="yfc@yfcmc.org"
 
 # build the latest code

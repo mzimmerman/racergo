@@ -185,15 +185,7 @@ func download(w http.ResponseWriter, r *http.Request) {
 	}
 	csvData := make([][]string, 0, length+1)
 	headerRow := append([]string{"Fname", "Lname", "Age", "Gender", "Bib", "Overall Place", "Time"}, optionalEntryFields...)
-	blank := make([]string, len(optionalEntryFields))
 	csvData = append(csvData, headerRow)
-	for _, result := range results {
-		if result.Entry == nil {
-			csvData = append(csvData, append([]string{"", "", "", "", "", strconv.Itoa(int(result.Place)), result.Time.String()}, blank...))
-		} else {
-			csvData = append(csvData, append([]string{result.Entry.Fname, result.Entry.Lname, strconv.Itoa(int(result.Entry.Age)), gender(result.Entry.Male), strconv.Itoa(int(result.Entry.Bib)), strconv.Itoa(int(result.Place)), result.Time.String()}, result.Entry.Optional...))
-		}
-	}
 	for _, entry := range allEntries {
 		if entry.Result != nil {
 			csvData = append(csvData, append([]string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), gender(entry.Male), "", "", ""}, entry.Optional...))
@@ -545,6 +537,7 @@ func linkBib(w http.ResponseWriter, r *http.Request) {
 				time.Sleep(backoff)
 			}
 		}(entry.Fname, entry.Lname, emailAddr, entry.Result.Time)
+		return
 	}
 	result := &Result{
 		Time:      deltaT,

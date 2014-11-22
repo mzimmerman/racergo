@@ -314,16 +314,30 @@ func uploadRacers(w http.ResponseWriter, r *http.Request) {
 	}
 	// initialize the optionalEntryFields for use when we export/display the data
 	optionalEntryFields = make([]string, 0)
+	mandatoryFields := map[string]struct{}{
+		"Fname" : struct{}{},
+		"Lname" : struct{}{},
+		"Age" : struct{}{},
+		"Gender" : struct{}{},
+	}
 	for col := range rawEntries[0] {
 		switch rawEntries[0][col] {
 		case "Fname":
+			fallthrough
 		case "Lname":
+			fallthrough
 		case "Age":
+			fallthrough
 		case "Gender":
-		case "Bib":
+			delete(mandatoryFields,rawEntries[0][col])
+		case "Bib": // Bib is a special case but is not mandatory
 		default:
 			optionalEntryFields = append(optionalEntryFields, rawEntries[0][col])
 		}
+	}
+	if len(mandatoryFields) > 0 {
+		showErrorForAdmin(w, r.Referer(), fmt.Sprintf("CSV file missing the following fields - %s", mandatoryFields))
+		return
 	}
 	// load the data
 	for row := 1; row < len(rawEntries); row++ {

@@ -315,10 +315,10 @@ func uploadRacers(w http.ResponseWriter, r *http.Request) {
 	// initialize the optionalEntryFields for use when we export/display the data
 	optionalEntryFields = make([]string, 0)
 	mandatoryFields := map[string]struct{}{
-		"Fname" : struct{}{},
-		"Lname" : struct{}{},
-		"Age" : struct{}{},
-		"Gender" : struct{}{},
+		"Fname":  struct{}{},
+		"Lname":  struct{}{},
+		"Age":    struct{}{},
+		"Gender": struct{}{},
 	}
 	for col := range rawEntries[0] {
 		switch rawEntries[0][col] {
@@ -329,7 +329,7 @@ func uploadRacers(w http.ResponseWriter, r *http.Request) {
 		case "Age":
 			fallthrough
 		case "Gender":
-			delete(mandatoryFields,rawEntries[0][col])
+			delete(mandatoryFields, rawEntries[0][col])
 		case "Bib": // Bib is a special case but is not mandatory
 		default:
 			optionalEntryFields = append(optionalEntryFields, rawEntries[0][col])

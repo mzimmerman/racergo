@@ -511,13 +511,40 @@ func linkBib(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if entry.Result != nil {
-		if !entry.Result.Confirmed {
-			entry.Result.Confirmed = true
-			http.Redirect(w, r, "/admin", 301)
+		if entry.Result.Confirmed {
+			showErrorForAdmin(w, r.Referer(), "Bib number %d already confirmed for place #%d", bib, entry.Result.Place)
 			return
 		}
-		showErrorForAdmin(w, r.Referer(), "Bib number %d already confirmed for place #%d", bib, entry.Result.Place)
-		return
+		entry.Result.Confirmed = true
+		http.Redirect(w, r, "/admin", 301)
+		if emailIndex == -1 { // no e-mail address was found on data load, just return
+			return
+		}
+		emailAddr := entry.Optional[emailIndex]
+		_, err = mail.ParseAddress(emailAddr)
+		if err != nil {
+			log.Printf("Error parsing e-mail address of %s\n", emailAddr)
+			return
+		}
+		go func(fname, lname, email string, hd HumanDuration) {
+			m := sendgrid.NewMail()
+			client := sendgrid.NewSendGridClient(config.sendgriduser, config.sendgridpass)
+			m.AddTo(fmt.Sprintf("%s %s <%s>", fname, lname, email))
+			m.SetSubject(fmt.Sprintf("%s Results", config.raceName))
+			m.SetText(fmt.Sprintf("Congratulations %s %s!  You finished the %s in %s!", fname, lname, config.raceName, hd))
+			m.SetFrom(config.emailFrom)
+			backoff := time.Second
+			for {
+				err := client.Send(m)
+				if err == nil {
+					log.Printf("Success sending %#v", m)
+					return
+				}
+				backoff = backoff * 2
+				log.Printf("Error sending mail to %s - %v, trying again in %s", email, err, backoff)
+				time.Sleep(backoff)
+			}
+		}(entry.Fname, entry.Lname, emailAddr, entry.Result.Time)
 	}
 	result := &Result{
 		Time:      deltaT,
@@ -530,34 +557,6 @@ func linkBib(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Set bib for place %d to %d\n", result.Place, bib)
 	calculatePrizes(result)
 	http.Redirect(w, r, "/admin", 301)
-	if emailIndex == -1 {
-		return
-	}
-	emailAddr := entry.Optional[emailIndex]
-	_, err = mail.ParseAddress(emailAddr)
-	if err != nil {
-		log.Printf("Error parsing e-mail address of %s\n", emailAddr)
-		return
-	}
-	go func(fname, lname, email string, hd HumanDuration) {
-		m := sendgrid.NewMail()
-		client := sendgrid.NewSendGridClient(config.sendgriduser, config.sendgridpass)
-		m.AddTo(fmt.Sprintf("%s %s <%s>", fname, lname, email))
-		m.SetSubject(fmt.Sprintf("%s Results", config.raceName))
-		m.SetText(fmt.Sprintf("Congratulations %s %s!  You finished the %s in %s!", fname, lname, config.raceName, hd))
-		m.SetFrom(config.emailFrom)
-		backoff := time.Second
-		for {
-			err := client.Send(m)
-			if err == nil {
-				log.Printf("Success sending %#v", m)
-				return
-			}
-			backoff = backoff * 2
-			log.Printf("Error sending mail to %s - %v, trying again in %s", email, err, backoff)
-
-		}
-	}(entry.Fname, entry.Lname, emailAddr, result.Time)
 }
 
 func showErrorForAdmin(w http.ResponseWriter, referrer string, message string, args ...interface{}) {

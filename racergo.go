@@ -27,14 +27,32 @@ import (
 
 type Bib int
 
+func (b Bib) String() string {
+	if b < 0 {
+		return "--"
+	}
+	return strconv.Itoa(int(b))
+}
+
+type Place uint
+
+func (p Place) String() string {
+	if p == 0 {
+		return "--"
+	}
+	return strconv.Itoa(int(p))
+}
+
+type Index int
+
 var startRaceChan chan time.Time
 var raceHasStarted bool = false
 var raceStart time.Time
 var optionalEntryFields []string
-var bibbedEntries map[Bib]*Entry // map of Bib #s pointing to bibbed entries only
-var allEntries []*Entry          // slice of all Entries, bibbed and unbibbed
-var results []*Result
-var auditLog []Audit
+var bibbedEntries map[Bib]*Entry         // map of Bib #s pointing to bibbed entries only
+var allEntries = make([]*Entry, 0, 1024) // slice of all Entries, bibbed and unbibbed, w/ result or not
+var results = make([]Index, 0, 1024)
+var auditLog = make([]Audit, 0, 1024)
 var raceResultsTemplate *template.Template
 var errorTemplate *template.Template
 var prizes []*Prize
@@ -87,62 +105,72 @@ func init() {
 	}
 }
 
-type HumanDuration time.Duration
-
 type Prize struct {
 	Title    string
 	LowAge   uint
 	HighAge  uint
-	Gender   string    // M = only males, F = only Females, O = Overall
-	Amount   uint      // how many people win this prize?
-	WinAgain bool      // if someone has already won another Prize, can they win this again?
-	Winners  []*Result `json:"-"`
+	Gender   string   // M = only males, F = only Females, O = Overall
+	Amount   uint     // how many people win this prize?
+	WinAgain bool     // if someone has already won another Prize, can they win this again?
+	Winners  []*Entry `json:"-"`
 }
 
 type Entry struct {
-	Bib      Bib
-	Fname    string
-	Lname    string
-	Male     bool
-	Age      uint
-	Optional []string
-	Result   *Result
+	Bib          Bib
+	Fname        string
+	Lname        string
+	Male         bool
+	Age          uint
+	Optional     []string
+	Duration     HumanDuration
+	TimeFinished time.Time
+	Confirmed    bool
+	Place        Place
+	Index Index // a unique increasing value for each runner/entry
+}
+
+func (e Entry) HasFinished() bool {
+	return e.Duration > 0
 }
 
 type Audit struct {
-	Time   HumanDuration
-	Bib    Bib
-	Remove bool
+	Duration HumanDuration
+	Bib      Bib
+	Remove   bool
 }
 
-type Result struct {
-	Time      HumanDuration
-	Place     uint
-	Entry     *Entry
-	Confirmed bool
+type EntrySort []*Entry
+
+func (es *EntrySort) Len() int {
+	return len(*es)
 }
 
-type ResultSort []*Result
-
-func (rs *ResultSort) Len() int {
-	return len(*rs)
+func (es *EntrySort) Less(i, j int) bool {
+	if !(*es)[i].HasFinished() { // this entry didn't finish, it doesn't beat anyone
+		return false
+	}
+	return (*es)[i].Duration < (*es)[j].Duration
 }
 
-func (rs *ResultSort) Less(i, j int) bool {
-	return (*rs)[i].Time < (*rs)[j].Time
+func (es *EntrySort) Swap(i, j int) {
+	(*es)[i], (*es)[j] = (*es)[j], (*es)[i]
 }
 
-func (rs *ResultSort) Swap(i, j int) {
-	(*rs)[i], (*rs)[j] = (*rs)[j], (*rs)[i]
-}
+type HumanDuration time.Duration
 
 func (hd HumanDuration) String() string {
+	if hd == 0 {
+		return "--"
+	}
 	seconds := time.Duration(hd).Seconds()
 	seconds -= float64(time.Duration(hd) / time.Minute * 60)
 	return fmt.Sprintf("%#02d:%#02d:%05.2f", time.Duration(hd)/time.Hour, time.Duration(hd)/time.Minute%60, seconds)
 }
 
 func (hd HumanDuration) Clock() string {
+	if hd == 0 {
+		return "--"
+	}
 	return fmt.Sprintf("%#02d:%#02d:%02d", time.Duration(hd)/time.Hour, time.Duration(hd)/time.Minute%60, time.Duration(hd)/time.Second%60)
 }
 
@@ -186,14 +214,10 @@ func download(w http.ResponseWriter, r *http.Request) {
 		length = len(results)
 	}
 	csvData := make([][]string, 0, length+1)
-	headerRow := append([]string{"Fname", "Lname", "Age", "Gender", "Bib", "Overall Place", "Time"}, optionalEntryFields...)
+	headerRow := append([]string{"Fname", "Lname", "Age", "Gender", "Bib", "Overall Place", "Duration", "Time Finished"}, optionalEntryFields...)
 	csvData = append(csvData, headerRow)
 	for _, entry := range allEntries {
-		if entry.Result != nil {
-			csvData = append(csvData, append([]string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), gender(entry.Male), "", "", ""}, entry.Optional...))
-		} else {
-			csvData = append(csvData, append([]string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), gender(entry.Male), strconv.Itoa(int(entry.Bib)), "", ""}, entry.Optional...))
-		}
+		csvData = append(csvData, append([]string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), gender(entry.Male), entry.Bib.String(), entry.Place.String(), entry.Duration.String(), entry.TimeFinished.Format(time.ANSIC)}, entry.Optional...))
 	}
 	mutex.Unlock()
 	writer := csv.NewWriter(w)
@@ -220,10 +244,7 @@ func uploadPrizes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonin := json.NewDecoder(part)
-	mutex.Lock()
-	defer mutex.Unlock()
-	auditClean = false
-	prizes = make([]*Prize, 0)
+	newPrizes := make([]*Prize, 0)
 	for {
 		var prize Prize
 		err = jsonin.Decode(&prize)
@@ -234,20 +255,19 @@ func uploadPrizes(w http.ResponseWriter, r *http.Request) {
 			showErrorForAdmin(w, r.Referer(), "Error fetching Prize Configurations - %s", err)
 			return
 		}
-		prizes = append(prizes, &prize)
+		newPrizes = append(newPrizes, &prize)
 	}
-	for _, result := range results {
-		if result.Entry == nil {
-			break // all done
-		}
-		calculatePrizes(result)
-	}
+	mutex.Lock()
+	defer mutex.Unlock()
+	auditClean = false
+	prizes = newPrizes
+	recomputeAllPrizes()
 	http.Redirect(w, r, "/admin", 301)
 }
 
-func calculatePrizes(r *Result) {
+func calculatePrizes(r *Entry) {
 	// prizes are calculated from top-down, meaning all "faster" racers have already been placed
-	if r.Entry == nil {
+	if r.Duration == 0 {
 		return // can't calculate prizes for someone who hasn't finished the race!
 	}
 	found := false
@@ -256,13 +276,13 @@ func calculatePrizes(r *Result) {
 		switch {
 		case found && !prize.WinAgain:
 			fallthrough
-		case r.Entry.Age < prize.LowAge:
+		case r.Age < prize.LowAge:
 			fallthrough
-		case r.Entry.Age > prize.HighAge:
+		case r.Age > prize.HighAge:
 			fallthrough
-		case r.Entry.Male && (prize.Gender == "F"):
+		case r.Male && (prize.Gender == "F"):
 			fallthrough
-		case !r.Entry.Male && (prize.Gender == "M"):
+		case !r.Male && (prize.Gender == "M"):
 			fallthrough
 		case len(prize.Winners) == int(prize.Amount):
 			continue // do not qualify any of these conditions
@@ -294,11 +314,11 @@ func uploadRacers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-		// make the new in-memory data stores and unlink all previous relationships
+	// make the new in-memory data stores and unlink all previous relationships
 	newBibbedEntries := make(map[Bib]*Entry)
 	newAllEntries := make([]*Entry, 0, 1024)
 	for _, prize := range prizes {
-		prize.Winners = make([]*Result, 0)
+		prize.Winners = make([]*Entry, 0)
 	}
 	// initialize the optionalEntryFields for use when we export/display the data
 	newOptionalEntryFields := make([]string, 0)
@@ -354,7 +374,7 @@ func uploadRacers(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if _, ok := newBibbedEntries[entry.Bib]; ok {
-			showErrorForAdmin(w,r.Referer(),"Duplicate bib #%d detected in uploaded CSV file.  Import failed.",entry.Bib)
+			showErrorForAdmin(w, r.Referer(), "Duplicate bib #%d detected in uploaded CSV file.  Import failed.", entry.Bib)
 			return
 		}
 		if entry.Bib >= 0 {
@@ -369,7 +389,7 @@ func uploadRacers(w http.ResponseWriter, r *http.Request) {
 	bibbedEntries = newBibbedEntries
 	allEntries = newAllEntries
 	optionalEntryFields = newOptionalEntryFields
-	results = make([]*Result,0,1024)
+	results = results[:0]
 
 	emailIndex = -1
 	if config.sendgriduser == SENDGRIDUSER || config.sendgridpass == SENDGRIDPASS {
@@ -385,7 +405,7 @@ func uploadRacers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if emailIndex == -1 {
-		log.Printf("No e-mail column of %s found in optionally uploaded fields, not sending result e-mails",config.emailField)
+		log.Printf("No e-mail column of %s found in optionally uploaded fields, not sending result e-mails", config.emailField)
 	}
 	http.Redirect(w, r, "/admin", 301)
 }
@@ -400,10 +420,6 @@ func auditPost(w http.ResponseWriter, r *http.Request) {
 	// wipe the in-memory data stores
 	newBibbedEntries := make(map[Bib]*Entry)
 	newAllEntries := make([]*Entry, 0, 1024)
-	newResults := make([]*Result, 0, 1024)
-	for _, prize := range prizes {
-		prize.Winners = make([]*Result, 0)
-	}
 	r.ParseForm()
 	// load the new entries
 	for row := 0; ; row++ {
@@ -428,12 +444,9 @@ func auditPost(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			fmt.Printf("Unable to parse duration - %v\n", err)
 		} else {
-			entry.Result = &Result{
-				Time:      duration,
-				Confirmed: true,
-				Entry:     entry,
-			}
-			newResults = append(newResults, entry.Result)
+			entry.Duration = duration
+			// TODO: entry.TimeFinished = raceStart
+			entry.Confirmed = true
 		}
 		for _, opt := range optionalEntryFields {
 			entry.Optional = append(entry.Optional, r.FormValue(rowString+opt))
@@ -451,11 +464,19 @@ func auditPost(w http.ResponseWriter, r *http.Request) {
 	bibbedEntries = newBibbedEntries
 	allEntries = newAllEntries
 	// now rebuild results
-	sort.Sort((*ResultSort)(&newResults))
-	for x := range newResults {
-		newResults[x].Place = uint(x + 1)
+	sort.Sort((*EntrySort)(&allEntries))
+	results = results[:0]
+	var place Place
+	for x, e := range allEntries {
+		if e.HasFinished() {
+			place++
+			e.Place = place
+			results = append(results, Index(x))
+		}
 	}
-	results = newResults
+	for _, prize := range prizes {
+		prize.Winners = make([]*Entry, 0)
+	}
 	recomputeAllPrizes()
 	http.Redirect(w, r, "/audit", 301)
 }
@@ -487,40 +508,36 @@ func linkBib(w http.ResponseWriter, r *http.Request) {
 	mutex.Lock()
 	defer mutex.Unlock()
 	auditClean = false
-	auditLog = append(auditLog, Audit{Time: deltaT, Bib: bib, Remove: removeBib})
+	auditLog = append(auditLog, Audit{Duration: deltaT, Bib: bib, Remove: removeBib})
 	entry, ok := bibbedEntries[bib]
 	if !ok {
 		showErrorForAdmin(w, r.Referer(), "Bib number %d was not assigned to anyone.", bib)
 		return
 	}
 	if removeBib {
-		if entry.Result == nil {
+		if entry.Duration == 0 {
 			// entry already removed, act successful
 			http.Redirect(w, r, "/admin", 301)
 			return
 		}
-		index := int(entry.Result.Place) - 1
+		index := int(entry.Place) - 1
 		log.Printf("Bib = %d, index = %d, len(results) = %d", bib, index, len(results))
-		entry.Result = nil
-		if index >= len(results) {
-			// something's out of whack here -- The Entry has a Result but the Result isn't in the results slice
-			// the fix is removing the entry's result which happens before this if statement
-			showErrorForAdmin(w, r.Referer(), "Bib has a result recorded but is not in the results table! - attempted to fix it")
-			return
-		}
+		entry.Duration = 0
+		entry.TimeFinished = time.Time{}
+		entry.Confirmed = false
 		results = append(results[:index], results[index+1:]...)
 		for x := index; x < len(results); x++ {
-			results[x].Place = results[x].Place - 1
+			allEntries[results[x]].Place--
 		}
 		http.Redirect(w, r, "/admin", 301)
 		return
 	}
-	if entry.Result != nil {
-		if entry.Result.Confirmed {
-			showErrorForAdmin(w, r.Referer(), "Bib number %d already confirmed for place #%d", bib, entry.Result.Place)
+	if entry.Duration == 0 {
+		if entry.Confirmed {
+			showErrorForAdmin(w, r.Referer(), "Bib number %d already confirmed for place #%d", bib, entry.Place)
 			return
 		}
-		entry.Result.Confirmed = true
+		entry.Confirmed = true
 		http.Redirect(w, r, "/admin", 301)
 		if emailIndex == -1 { // no e-mail address was found on data load, just return
 			return
@@ -549,19 +566,15 @@ func linkBib(w http.ResponseWriter, r *http.Request) {
 				log.Printf("Error sending mail to %s - %v, trying again in %s", email, err, backoff)
 				time.Sleep(backoff)
 			}
-		}(entry.Fname, entry.Lname, emailAddr, entry.Result.Time)
+		}(entry.Fname, entry.Lname, emailAddr, entry.Duration)
 		return
 	}
-	result := &Result{
-		Time:      deltaT,
-		Place:     uint(len(results) + 1),
-		Confirmed: false,
-		Entry:     entry,
-	}
-	results = append(results, result)
-	entry.Result = result
-	log.Printf("Set bib for place %d to %d\n", result.Place, bib)
-	calculatePrizes(result)
+	entry.Duration = deltaT
+	entry.Place = Place(len(results) + 1)
+	entry.Confirmed = false
+	results = append(results, entry.Index)
+	log.Printf("Linked bib for place %d to %d, %s %s\n", entry.Place, entry.Bib, entry.Fname, entry.Lname)
+	calculatePrizes(entry)
 	http.Redirect(w, r, "/admin", 301)
 }
 
@@ -583,13 +596,13 @@ func showErrorForAdmin(w http.ResponseWriter, referrer string, message string, a
 func recomputeAllPrizes() {
 	// now need to recompute the prize results
 	for _, prize := range prizes {
-		prize.Winners = make([]*Result, 0)
+		prize.Winners = make([]*Entry, 0)
 	}
-	for _, result := range results {
-		if result.Entry == nil {
+	for _, idx := range results {
+		if allEntries[idx].Duration == 0 {
 			break // all done
 		}
-		calculatePrizes(result)
+		calculatePrizes(allEntries[idx])
 	}
 }
 
@@ -684,14 +697,14 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	default:
 		name = "default"
 	case "admin":
-		recentRacers := make([]*Result, 0, len(results))
+		recentRacers := make([]*Entry, 0, len(results))
 		end := len(results)
 		for {
 			end--
 			if end < 0 {
 				break
 			}
-			recentRacers = append(recentRacers, results[end])
+			recentRacers = append(recentRacers, allEntries[results[end]])
 			if end < len(results)-10 { // list no more than 10 most recent
 				break
 			}
@@ -707,14 +720,14 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		}
 		data["Fields"] = optionalEntryFields
 	case "results":
-		recentRacers := make([]*Result, 0, len(results))
+		recentRacers := make([]*Entry, 0, len(results))
 		end := len(results)
 		for {
 			end--
 			if end < 0 {
 				break
 			}
-			recentRacers = append(recentRacers, results[end])
+			recentRacers = append(recentRacers, allEntries[results[end]])
 		}
 		data["RecentRacers"] = recentRacers
 	}
@@ -768,7 +781,7 @@ func uploadFile(filename string) (*http.Request, error) {
 func reset() {
 	log.Printf("Initializing the race")
 	raceHasStarted = false
-	results = make([]*Result, 0, 1024)
+	results = make([]Index, 0, 1024)
 	auditLog = make([]Audit, 0, 1024)
 	req, err := uploadFile("prizes.json")
 	if err == nil {

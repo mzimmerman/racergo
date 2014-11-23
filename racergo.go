@@ -25,11 +25,13 @@ import (
 	"github.com/mzimmerman/sendgrid-go"
 )
 
+type Bib int
+
 var startRaceChan chan time.Time
 var raceHasStarted bool = false
 var raceStart time.Time
 var optionalEntryFields []string
-var bibbedEntries map[int]*Entry // map of Bib #s pointing to bibbed entries only
+var bibbedEntries map[Bib]*Entry // map of Bib #s pointing to bibbed entries only
 var allEntries []*Entry          // slice of all Entries, bibbed and unbibbed
 var results []*Result
 var auditLog []Audit
@@ -98,7 +100,7 @@ type Prize struct {
 }
 
 type Entry struct {
-	Bib      int
+	Bib      Bib
 	Fname    string
 	Lname    string
 	Male     bool
@@ -109,7 +111,7 @@ type Entry struct {
 
 type Audit struct {
 	Time   HumanDuration
-	Bib    int
+	Bib    Bib
 	Remove bool
 }
 
@@ -190,7 +192,7 @@ func download(w http.ResponseWriter, r *http.Request) {
 		if entry.Result != nil {
 			csvData = append(csvData, append([]string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), gender(entry.Male), "", "", ""}, entry.Optional...))
 		} else {
-			csvData = append(csvData, append([]string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), gender(entry.Male), strconv.Itoa(entry.Bib), "", ""}, entry.Optional...))
+			csvData = append(csvData, append([]string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), gender(entry.Male), strconv.Itoa(int(entry.Bib)), "", ""}, entry.Optional...))
 		}
 	}
 	mutex.Unlock()
@@ -291,21 +293,15 @@ func uploadRacers(w http.ResponseWriter, r *http.Request) {
 		showErrorForAdmin(w, r.Referer(), "Either blank file or only supplied the header row")
 		return
 	}
-	mutex.Lock()
-	defer mutex.Unlock()
 
-	auditClean = false
-	// make the in-memory data stores and unlink all previous relationships
-	bibbedEntries = make(map[int]*Entry)
-	allEntries = make([]*Entry, 0, 1024)
+		// make the new in-memory data stores and unlink all previous relationships
+	newBibbedEntries := make(map[Bib]*Entry)
+	newAllEntries := make([]*Entry, 0, 1024)
 	for _, prize := range prizes {
 		prize.Winners = make([]*Result, 0)
 	}
-	for _, result := range results {
-		result.Entry = nil
-	}
 	// initialize the optionalEntryFields for use when we export/display the data
-	optionalEntryFields = make([]string, 0)
+	newOptionalEntryFields := make([]string, 0)
 	mandatoryFields := map[string]struct{}{
 		"Fname":  struct{}{},
 		"Lname":  struct{}{},
@@ -324,11 +320,11 @@ func uploadRacers(w http.ResponseWriter, r *http.Request) {
 			delete(mandatoryFields, rawEntries[0][col])
 		case "Bib": // Bib is a special case but is not mandatory
 		default:
-			optionalEntryFields = append(optionalEntryFields, rawEntries[0][col])
+			newOptionalEntryFields = append(newOptionalEntryFields, rawEntries[0][col])
 		}
 	}
 	if len(mandatoryFields) > 0 {
-		showErrorForAdmin(w, r.Referer(), fmt.Sprintf("CSV file missing the following fields - %s", mandatoryFields))
+		showErrorForAdmin(w, r.Referer(), "CSV file missing the following fields - %s", mandatoryFields)
 		return
 	}
 	// load the data
@@ -347,19 +343,34 @@ func uploadRacers(w http.ResponseWriter, r *http.Request) {
 			case "Gender":
 				entry.Male = (rawEntries[row][col] == "M")
 			case "Bib":
-				entry.Bib, err = strconv.Atoi(rawEntries[row][col])
+				tmpBib, err := strconv.Atoi(rawEntries[row][col])
 				if err != nil {
 					entry.Bib = -1
+				} else {
+					entry.Bib = Bib(tmpBib)
 				}
 			default:
 				entry.Optional = append(entry.Optional, rawEntries[row][col])
 			}
 		}
-		if entry.Bib >= 0 {
-			bibbedEntries[entry.Bib] = entry
+		if _, ok := newBibbedEntries[entry.Bib]; ok {
+			showErrorForAdmin(w,r.Referer(),"Duplicate bib #%d detected in uploaded CSV file.  Import failed.",entry.Bib)
+			return
 		}
-		allEntries = append(allEntries, entry)
+		if entry.Bib >= 0 {
+			newBibbedEntries[entry.Bib] = entry
+		}
+		newAllEntries = append(newAllEntries, entry)
 	}
+
+	mutex.Lock()
+	defer mutex.Unlock()
+	auditClean = false
+	bibbedEntries = newBibbedEntries
+	allEntries = newAllEntries
+	optionalEntryFields = newOptionalEntryFields
+	results = make([]*Result,0,1024)
+
 	emailIndex = -1
 	if config.sendgriduser == SENDGRIDUSER || config.sendgridpass == SENDGRIDPASS {
 		log.Printf("Sendgrid user/password information not found, not sending result emails")
@@ -372,9 +383,9 @@ func uploadRacers(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
-		if emailIndex == -1 {
-			log.Printf("No e-mail addresses configured in optionally uploaded fields, not sending result e-mails")
-		}
+	}
+	if emailIndex == -1 {
+		log.Printf("No e-mail column of %s found in optionally uploaded fields, not sending result e-mails",config.emailField)
 	}
 	http.Redirect(w, r, "/admin", 301)
 }
@@ -387,14 +398,13 @@ func auditPost(w http.ResponseWriter, r *http.Request) {
 	}
 	auditClean = false
 	// wipe the in-memory data stores
-	newBibbedEntries := make(map[int]*Entry)
+	newBibbedEntries := make(map[Bib]*Entry)
 	newAllEntries := make([]*Entry, 0, 1024)
 	newResults := make([]*Result, 0, 1024)
 	for _, prize := range prizes {
 		prize.Winners = make([]*Result, 0)
 	}
 	r.ParseForm()
-	var err error
 	// load the new entries
 	for row := 0; ; row++ {
 		rowString := strconv.Itoa(row) + "."
@@ -405,9 +415,11 @@ func auditPost(w http.ResponseWriter, r *http.Request) {
 		tmpAge, _ := strconv.Atoi(r.FormValue(rowString + "Age"))
 		entry.Age = uint(tmpAge)
 		entry.Male = (r.FormValue(rowString+"Male") == "M")
-		entry.Bib, err = strconv.Atoi(r.FormValue(rowString + "Bib"))
+		tmpBib, err := strconv.Atoi(r.FormValue(rowString + "Bib"))
 		if err != nil {
 			entry.Bib = -1
+		} else {
+			entry.Bib = Bib(tmpBib)
 		}
 		if entry.Fname == "" && entry.Lname == "" && entry.Age == 0 && entry.Bib == -1 {
 			break // this one has all default/empty values, must be the end of the records found
@@ -461,15 +473,16 @@ func linkBib(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	removeBib := r.FormValue("remove") == "true"
-	bib, err := strconv.Atoi(r.FormValue("bib"))
+	tmpBib, err := strconv.Atoi(r.FormValue("bib"))
 	if err != nil {
 		showErrorForAdmin(w, r.Referer(), "Error %s getting bib number", err)
 		return
 	}
-	if bib < 0 {
-		showErrorForAdmin(w, r.Referer(), "Cannot assign a negative bib number of %d", bib)
+	if tmpBib < 0 {
+		showErrorForAdmin(w, r.Referer(), "Cannot assign a negative bib number of %d", tmpBib)
 		return
 	}
+	bib := Bib(tmpBib)
 	deltaT := HumanDuration(time.Since(raceStart))
 	mutex.Lock()
 	defer mutex.Unlock()
@@ -586,11 +599,12 @@ func assignBib(w http.ResponseWriter, r *http.Request) {
 		showErrorForAdmin(w, r.Referer(), r.Referer(), "Error %s getting next", err)
 		return
 	}
-	bib, err := strconv.Atoi(r.FormValue("bib"))
-	if bib < 0 || err != nil {
+	tmpBib, err := strconv.Atoi(r.FormValue("bib"))
+	if tmpBib < 0 || err != nil {
 		showErrorForAdmin(w, r.Referer(), "Could not get a valid bib number from %s", r.FormValue("bib"))
 		return
 	}
+	bib := Bib(tmpBib)
 	mutex.Lock()
 	defer mutex.Unlock()
 
@@ -623,7 +637,8 @@ func addEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	entry.Age = uint(age)
-	entry.Bib, err = strconv.Atoi(r.FormValue("Bib"))
+	tmpBib, err := strconv.Atoi(r.FormValue("Bib"))
+	entry.Bib = Bib(tmpBib)
 	if entry.Bib < 0 {
 		showErrorForAdmin(w, r.Referer(), "Not a valid bib, must be >= 0")
 		return
@@ -643,7 +658,11 @@ func addEntry(w http.ResponseWriter, r *http.Request) {
 		entry.Optional = append(entry.Optional, r.FormValue(s))
 	}
 	if bibbedEntries == nil {
-		bibbedEntries = make(map[int]*Entry)
+		bibbedEntries = make(map[Bib]*Entry)
+	}
+	if _, ok := bibbedEntries[entry.Bib]; ok {
+		showErrorForAdmin(w, r.Referer(), "Bib #%d already assigned", entry.Bib)
+		return
 	}
 	bibbedEntries[entry.Bib] = entry
 	allEntries = append(allEntries, entry)

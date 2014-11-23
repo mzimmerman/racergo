@@ -19,7 +19,7 @@ func startRace() {
 
 func addTestEntry(t *testing.T, e *Entry) {
 	values := make(url.Values)
-	values.Add("Bib", strconv.Itoa(e.Bib))
+	values.Add("Bib", strconv.Itoa(int(e.Bib)))
 	values.Add("Age", strconv.Itoa(int(e.Age)))
 	values.Add("Fname", e.Fname)
 	values.Add("Lname", e.Lname)
@@ -147,7 +147,7 @@ func TestLink(t *testing.T) { // includes removing of racers
 	// 8 racers, test the beginning, middle, and end
 	tableTests := []struct {
 		place     int
-		bib       int
+		bib       Bib
 		code      int
 		confirmed bool
 		remove    bool
@@ -176,7 +176,7 @@ func TestLink(t *testing.T) { // includes removing of racers
 	for i, x := range tableTests {
 		req, err := http.NewRequest("post", "", nil)
 		req.ParseForm()
-		req.Form.Set("bib", strconv.Itoa(x.bib))
+		req.Form.Set("bib", strconv.Itoa(int(x.bib)))
 		if x.remove {
 			req.Form.Set("remove", "true")
 		}

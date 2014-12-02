@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"io"
 	"log"
+	"math/rand"
 	"mime/multipart"
 	"net"
 	"net/http"
@@ -49,10 +50,13 @@ var linkBibChan = make(chan Bib)
 var removeBibChan = make(chan Bib)
 var addEntryChan = make(chan Entry)
 var prizesChan = make(chan []Prize)
+var downloadEntries = make(chan []*Entry)
+var downloadPrizes = make(chan []Prize)
 var requestTemplateData = make(chan templateRequest)
 var modifyEntryChan = make(chan struct {
 	entry Entry
 	index Index
+	nonce int
 })
 
 //var swapInNewChan = make(chan struct {
@@ -795,7 +799,7 @@ func addEntry(entry Entry, bibbedEntries map[Bib]*Entry, allEntries *[]*Entry, r
 	return nil
 }
 
-func generateTemplate(req templateRequest, allEntries []*Entry, raceStart time.Time, auditLog []Audit, optionalEntryFields []string, prizes []Prize) error {
+func generateTemplate(req templateRequest, allEntries []*Entry, raceStart time.Time, auditLog []Audit, optionalEntryFields []string, prizes []Prize, modifyNonce int) error {
 	data := map[string]interface{}{"Racers": allEntries}
 	switch req.name {
 	default:
@@ -804,6 +808,7 @@ func generateTemplate(req templateRequest, allEntries []*Entry, raceStart time.T
 		data["Audit"] = auditLog
 		data["Entries"] = allEntries
 		data["Fields"] = optionalEntryFields
+		data["Nonce"] = modifyNonce
 		fallthrough
 	case "admin":
 		data["Admin"] = true
@@ -847,17 +852,18 @@ func manageRaceState() {
 	allEntries := make([]*Entry, 0, 1024) // a sorted slice of all Entries, bibbed and unbibbed, w/ result or not, sorted by Place (first to last)
 	auditLog := make([]Audit, 0, 1024)    // A writeonly location to record the actions/events of the race
 	prizes := make([]Prize, 0, 48)
+	modifyNonce := 0
 	optionalEmailIndex := -1 // initialize it to an invalid value
 	log.Printf("Initialized the race")
 	for {
 		select {
-		//case uploadRacersChan:
-		//	for _, prize := range prizes {
-		//		prize.Winners = make([]*Entry, 0)
-		//	}
 		case templateReq := <-requestTemplateData:
-			errorChan <- generateTemplate(templateReq, allEntries, raceStart, auditLog, optionalEntryFields, prizes)
+			if templateReq.name == "audit" {
+				modifyNonce = rand.Int()
+			}
+			errorChan <- generateTemplate(templateReq, allEntries, raceStart, auditLog, optionalEntryFields, prizes, modifyNonce)
 		case tmp := <-setOptionalFieldsChan:
+			modifyNonce = 0
 			if optionalEntryFields == nil {
 				optionalEntryFields = tmp
 				errorChan <- nil
@@ -870,17 +876,26 @@ func manageRaceState() {
 		case raceStart = <-startRaceChan:
 			src <- raceStart
 		case mod := <-modifyEntryChan:
-			errorChan <- modifyEntry(mod.entry, mod.index, bibbedEntries, &allEntries)
+			if mod.nonce != modifyNonce {
+				errorChan <- fmt.Errorf("Error updating entry - audit record was out of date, try your change again")
+			} else {
+				errorChan <- modifyEntry(mod.entry, mod.index, bibbedEntries, &allEntries)
+			}
+			modifyNonce = 0
 		case entry := <-addEntryChan:
 			errorChan <- addEntry(entry, bibbedEntries, &allEntries, raceStart)
 		case bib := <-linkBibChan:
+			modifyNonce = 0
 			if raceStart.IsZero() {
 				errorChan <- fmt.Errorf("Race has not started yet, cannot link a bib")
 			} else {
 				errorChan <- recordTimeForBib(bib, bibbedEntries, &allEntries, optionalEmailIndex, raceStart)
 			}
 		case bib := <-removeBibChan:
+			modifyNonce = 0
 			errorChan <- removeTimeForBib(bib, bibbedEntries, allEntries)
+		case downloadEntries <- allEntries:
+		case downloadPrizes <- prizes:
 		}
 	}
 }

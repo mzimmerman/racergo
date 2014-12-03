@@ -37,19 +37,9 @@ func addTestEntry(t *testing.T, e *Entry, optionalEntryFields []string) {
 	}
 }
 
-//type Entry struct {
-//	Bib          Bib
-//	Fname        string
-//	Lname        string
-//	Male         bool
-//	Age          uint
-//	Optional     []string
-//	Duration     HumanDuration
-//	TimeFinished time.Time
-//	Confirmed    bool
-//}
-
 func TestDownloadAndAudit(t *testing.T) {
+	resetRaceStateChan <- struct{}{}
+	startRace()
 	optionalEntryFields := []string{"Email", "Large"}
 	raceStart := time.Now().Add(-time.Hour)
 	users := []Entry{
@@ -70,6 +60,7 @@ func TestDownloadAndAudit(t *testing.T) {
 }
 
 func TestLoadRacers(t *testing.T) {
+	resetRaceStateChan <- struct{}{}
 	startRace()
 	// race is started, load the racers
 	req, err := uploadFile("test_runners.csv")
@@ -85,6 +76,7 @@ func TestLoadRacers(t *testing.T) {
 		t.Errorf("Expected redirect, got %d", w.Code)
 	}
 
+	resetRaceStateChan <- struct{}{}
 	req, err = uploadFile("test_runners2.csv")
 	if err != nil {
 		t.Errorf("Unexpected error - %v", err)
@@ -97,6 +89,8 @@ func TestLoadRacers(t *testing.T) {
 	if w.Code != 301 {
 		t.Errorf("Expected redirect, got %d", w.Code)
 	}
+
+	resetRaceStateChan <- struct{}{}
 	req, err = uploadFile("test_runners3.csv")
 	if err != nil {
 		t.Errorf("Unexpected error - %v", err)
@@ -112,6 +106,7 @@ func TestLoadRacers(t *testing.T) {
 }
 
 func TestLink(t *testing.T) { // includes removing of racers
+	resetRaceStateChan <- struct{}{}
 	startRace()
 	// race is started, load the racers
 	req, err := uploadFile("test_runners.csv")
@@ -126,7 +121,7 @@ func TestLink(t *testing.T) { // includes removing of racers
 	if w.Code != 301 {
 		t.Errorf("Expected redirect, got %d", w.Code)
 	}
-	// 8 racers, test the beginning, middle, and end
+	// test the beginning, middle, and end
 	tableTests := []struct {
 		place     int
 		bib       Bib
@@ -137,7 +132,7 @@ func TestLink(t *testing.T) { // includes removing of racers
 		{1, 0, 409, false, false}, // no bib #0 in test_runners.csv
 		{1, 1, 301, false, false},
 		{1, 1, 301, false, true},
-		{1, 1, 301, false, true},
+		{1, 1, 409, false, true},
 		{1, 1, 301, false, false},
 		{2, 2, 301, false, false},
 		{2, 2, 301, false, true},
@@ -156,6 +151,7 @@ func TestLink(t *testing.T) { // includes removing of racers
 		{6, 6, 301, true, false},
 	}
 	for i, x := range tableTests {
+		t.Logf("Iteration %d", i)
 		req, err := http.NewRequest("post", "", nil)
 		req.ParseForm()
 		req.Form.Set("bib", strconv.Itoa(int(x.bib)))
@@ -173,23 +169,18 @@ func TestLink(t *testing.T) { // includes removing of racers
 		if x.bib <= 0 || x.remove {
 			continue
 		}
-		//func() {
-		//	mutex.Lock()
-		//	defer mutex.Unlock()
-		//	if results[x.place-1].Confirmed != x.confirmed {
-		//		t.Errorf("Iteration - %d, Result %v confirmed != %v", i, results[x.place-1], x.confirmed)
-		//	}
-		//	if bibbedEntries[x.bib].Result != results[x.place-1] {
-		//		t.Errorf("Iteration - %d, Entry %v is not in place %d", i, bibbedEntries[x.bib], x.place)
-		//	}
-		//	if int(bibbedEntries[x.bib].Result.Place) != x.place {
-		//		t.Errorf("Iteration - %d, Bib %d is not in place %d but place %d!", i, x.bib, x.place, bibbedEntries[x.bib].Result.Place)
-		//	}
-		//}()
+		results := <-downloadEntries
+		if results[x.place-1].Confirmed != x.confirmed {
+			t.Errorf("Iteration - %d, Result %v confirmed != %v", i, results[x.place-1], x.confirmed)
+		}
+		if results[x.place-1].Bib != x.bib {
+			t.Errorf("Iteration - %d, Entry %v is not in place %d", i, results[x.place-1], x.place)
+		}
 	}
 }
 
 func TestPrizes(t *testing.T) {
+	resetRaceStateChan <- struct{}{}
 	startRace()
 	// race is started, load the racers
 	req, err := uploadFile("test_prizes.json")
@@ -219,6 +210,7 @@ func TestPrizes(t *testing.T) {
 	}
 	entries := <-downloadEntries
 	for _, entry := range entries {
+		t.Logf("Iterating on entry - %#v", entry)
 		req, err = http.NewRequest("post", "", nil)
 		if err != nil {
 			t.Errorf("Unexpected error - %v", err)
@@ -231,16 +223,25 @@ func TestPrizes(t *testing.T) {
 		w = httptest.NewRecorder()
 		linkBibHandler(w, req)
 		if w.Code != 301 {
-			t.Errorf("Expected redirect, got %d", w.Code)
+			t.Errorf("Expected redirect, got %s", w.Body)
 		}
 		w = httptest.NewRecorder()
 		linkBibHandler(w, req)
 		if w.Code != 301 {
-			t.Errorf("Expected redirect, got %d", w.Code)
+			t.Errorf("Expected redirect, got %s", w.Body)
 		}
 	}
 	results := <-downloadEntries
 	prizes := <-downloadPrizes
+	for x := range results {
+		t.Logf("Place #%d - %#v", x+1, results[x])
+	}
+	for x := range prizes {
+		t.Logf("--Prize %s--", prizes[x].Title)
+		for y := range prizes[x].Winners {
+			t.Logf("%v", prizes[x].Winners[y])
+		}
+	}
 	EqualInt(t, len(prizes[0].Winners), 1) // men's overall
 	if prizes[0].Winners[0] != results[0] {
 		t.Errorf("Wrong winner i")
@@ -298,30 +299,34 @@ func TestSortResults(t *testing.T) {
 		{Duration: HumanDuration(time.Minute)},
 		{Duration: HumanDuration(time.Hour)},
 	}
+	expected := []HumanDuration{
+		HumanDuration(time.Second),
+		HumanDuration(time.Minute),
+		HumanDuration(time.Hour),
+	}
 	sort.Sort((*EntrySort)(&results))
-	if results[0].Duration != HumanDuration(time.Second) {
-		t.Error()
-	}
-	if results[1].Duration != HumanDuration(time.Minute) {
-		t.Error()
-	}
-	if results[2].Duration != HumanDuration(time.Hour) {
-		t.Error()
+	for x := range results {
+		if want, got := expected[x], results[x].Duration; want != got {
+			t.Errorf("[%d] - Wanted %s, got %s", x, want, got)
+		}
 	}
 	results = []*Entry{
 		{Duration: HumanDuration(time.Minute)},
 		{Duration: HumanDuration(time.Second)},
+		{Duration: HumanDuration(0)},
 		{Duration: HumanDuration(time.Hour)},
 	}
+	expected = []HumanDuration{
+		HumanDuration(time.Second),
+		HumanDuration(time.Minute),
+		HumanDuration(time.Hour),
+		HumanDuration(0),
+	}
 	sort.Sort((*EntrySort)(&results))
-	if results[0].Duration != HumanDuration(time.Second) {
-		t.Error()
-	}
-	if results[1].Duration != HumanDuration(time.Minute) {
-		t.Error()
-	}
-	if results[2].Duration != HumanDuration(time.Hour) {
-		t.Error()
+	for x := range results {
+		if want, got := expected[x], results[x].Duration; want != got {
+			t.Errorf("[%d] - Wanted %s, got %s", x, want, got)
+		}
 	}
 }
 
@@ -332,7 +337,7 @@ func TestHumanDuration(t *testing.T) {
 		clock    string
 	}{
 		{HumanDuration(time.Second * 120), "00:02:00.00", "00:02:00"},
-		{HumanDuration(time.Second * 0), "00:00:00.00", "00:00:00"},
+		{HumanDuration(time.Second * 0), "--", "--"},
 		{HumanDuration(time.Hour), "01:00:00.00", "01:00:00"},
 		{HumanDuration(time.Second * 5), "00:00:05.00", "00:00:05"},
 		{HumanDuration(time.Second * 50), "00:00:50.00", "00:00:50"},
@@ -345,7 +350,7 @@ func TestHumanDuration(t *testing.T) {
 			t.Errorf("Expected %s, got %d", val.time, val.duration.String())
 		}
 		if val.duration.Clock() != val.clock {
-			t.Errorf("Expected %s, got %d", val.time, val.duration.String())
+			t.Errorf("Expected %s, got %d", val.clock, val.duration.Clock())
 		}
 		newDuration, err := ParseHumanDuration(val.time)
 		if err != nil {

@@ -58,6 +58,7 @@ var modifyEntryChan = make(chan struct {
 	index Index
 	nonce int
 })
+var resetRaceStateChan = make(chan struct{})
 
 //var swapInNewChan = make(chan struct {
 //	allEntries    []Entry
@@ -100,6 +101,7 @@ func init() {
 		log.Fatalf("Error parsing template! - %s\n", err)
 		return
 	}
+	go manageRaceState()
 }
 
 const NoBib Bib = -1
@@ -163,8 +165,14 @@ func (es *EntrySort) Len() int {
 }
 
 func (es *EntrySort) Less(i, j int) bool {
+	if (*es)[i].Duration == (*es)[j].Duration {
+		return (*es)[i].Bib < (*es)[j].Bib
+	}
 	if !(*es)[i].HasFinished() { // this entry didn't finish, it doesn't beat anyone
 		return false
+	}
+	if !(*es)[j].HasFinished() {
+		return true
 	}
 	return (*es)[i].Duration < (*es)[j].Duration
 }
@@ -193,6 +201,9 @@ func (hd HumanDuration) Clock() string {
 
 func ParseHumanDuration(val string) (HumanDuration, error) {
 	var duration HumanDuration
+	if val == "--" { // zero value case
+		return duration, nil
+	}
 	str := strings.Split(val, ":")
 	if len(str) < 3 {
 		return duration, fmt.Errorf("%s is not a valid race duration, must have two semicolons", val)
@@ -222,24 +233,19 @@ func ParseHumanDuration(val string) (HumanDuration, error) {
 }
 
 func downloadHandler(w http.ResponseWriter, r *http.Request) {
-	//filename := fmt.Sprintf(config.webserverHostname+"-%s.csv", time.Now().In(time.Local).Format("2006-01-02"))
-	//w.Header().Set("Content-type", "application/csv")
-	//w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
-	//mutex.Lock()
-	//length := len(allEntries)
-	//if length > len(results) {
-	//	length = len(results)
-	//}
-	//csvData := make([][]string, 0, length+1)
-	//headerRow := append([]string{"Fname", "Lname", "Age", "Gender", "Bib", "Overall Place", "Duration", "Time Finished"}, optionalEntryFields...)
-	//csvData = append(csvData, headerRow)
-	//for _, entry := range allEntries {
-	//	csvData = append(csvData, append([]string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), gender(entry.Male), entry.Bib.String(), entry.Place.String(), entry.Duration.String(), entry.TimeFinished.Format(time.ANSIC)}, entry.Optional...))
-	//}
-	//mutex.Unlock()
-	//writer := csv.NewWriter(w)
-	//writer.WriteAll(csvData)
-	//writer.Flush()
+	filename := fmt.Sprintf(config.webserverHostname+"-%s.csv", time.Now().In(time.Local).Format("2006-01-02"))
+	w.Header().Set("Content-type", "application/csv")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+	entries := <-downloadEntries
+	csvData := make([][]string, 0, len(entries)+1)
+	headerRow := append([]string{"Fname", "Lname", "Age", "Gender", "Bib", "Overall Place", "Duration", "Time Finished"}, <-getOptionalFieldsChan...)
+	csvData = append(csvData, headerRow)
+	for place, entry := range entries {
+		csvData = append(csvData, append([]string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), gender(entry.Male), entry.Bib.String(), strconv.Itoa(place + 1), entry.Duration.String(), entry.TimeFinished.Format(time.ANSIC)}, entry.Optional...))
+	}
+	writer := csv.NewWriter(w)
+	writer.WriteAll(csvData)
+	writer.Flush()
 }
 
 func gender(male bool) string {
@@ -280,27 +286,25 @@ func uploadPrizesHandler(w http.ResponseWriter, r *http.Request) {
 
 func calculatePrizes(r *Entry, prizes []Prize) {
 	// prizes are calculated from top-down, meaning all "faster" racers have already been placed
-	if !r.HasFinished() {
-		return // can't calculate prizes for someone who hasn't finished the race!
-	}
 	found := false
-	for _, prize := range prizes {
+	for p := range prizes {
 		switch {
-		case found && !prize.WinAgain:
+		case found && !prizes[p].WinAgain:
 			fallthrough
-		case r.Age < prize.LowAge:
+		case r.Age < prizes[p].LowAge:
 			fallthrough
-		case r.Age > prize.HighAge:
+		case r.Age > prizes[p].HighAge:
 			fallthrough
-		case r.Male && (prize.Gender == "F"):
+		case r.Male && (prizes[p].Gender == "F"):
 			fallthrough
-		case !r.Male && (prize.Gender == "M"):
+		case !r.Male && (prizes[p].Gender == "M"):
 			fallthrough
-		case len(prize.Winners) == int(prize.Amount):
+		case len(prizes[p].Winners) == int(prizes[p].Amount):
 			continue // do not qualify any of these conditions
 		}
 		found = true
-		prize.Winners = append(prize.Winners, r)
+		prizes[p].Winners = append(prizes[p].Winners, r)
+		log.Printf("Placing #%d in prize %s, place %d", r.Bib, prizes[p].Title, len(prizes[p].Winners))
 	}
 }
 
@@ -604,11 +608,11 @@ func showErrorForAdmin(w http.ResponseWriter, referrer string, message string, a
 }
 
 func recomputeAllPrizes(prizes []Prize, allEntries []*Entry) {
-	for _, prize := range prizes {
-		prize.Winners = make([]*Entry, 0)
+	for p := range prizes {
+		prizes[p].Winners = prizes[p].Winners[:0]
 	}
 	for _, v := range allEntries {
-		if !v.HasFinished() {
+		if !v.Confirmed {
 			break // all done
 		}
 		calculatePrizes(v, prizes)
@@ -735,12 +739,14 @@ func uploadFile(filename string) (*http.Request, error) {
 	//io.Copy(os.Stderr, res.Body) // Replace this with Status.Code check
 }
 
-func recordTimeForBib(bib Bib, bibbedEntries map[Bib]*Entry, allEntries *[]*Entry, emailFieldIndex int, raceStart time.Time) error {
+func recordTimeForBib(bib Bib, bibbedEntries map[Bib]*Entry, allEntries *[]*Entry, emailFieldIndex int, raceStart time.Time, prizes []Prize) error {
 	if entry, ok := bibbedEntries[bib]; ok {
 		if !entry.Confirmed {
 			if entry.HasFinished() {
 				entry.Confirmed = true
+				log.Printf("Bib #%d confirmed with duration - %s", bib, entry.Duration)
 				// TODO: Verify that every entry before them is *also* confirmed, otherwise their finishing place could be wrong
+				recomputeAllPrizes(prizes, *allEntries)
 				go sendEmailResponse(*entry, entry.Duration, emailFieldIndex)
 				return nil
 			}
@@ -749,6 +755,7 @@ func recordTimeForBib(bib Bib, bibbedEntries map[Bib]*Entry, allEntries *[]*Entr
 			entry.TimeFinished = now
 			sorted := EntrySort(*allEntries)
 			sort.Sort(&sorted)
+			log.Printf("Bib #%d linked with duration - %s", bib, entry.Duration)
 			return nil
 		}
 		return fmt.Errorf("Bib #%d already confirmed!", bib)
@@ -756,12 +763,15 @@ func recordTimeForBib(bib Bib, bibbedEntries map[Bib]*Entry, allEntries *[]*Entr
 	return fmt.Errorf("Bib %d not found", bib)
 }
 
-func removeTimeForBib(bib Bib, bibbedEntries map[Bib]*Entry, allEntries []*Entry) error {
+func removeTimeForBib(bib Bib, bibbedEntries map[Bib]*Entry, allEntries *[]*Entry) error {
 	if entry, ok := bibbedEntries[bib]; ok {
 		if !entry.Confirmed {
 			if entry.HasFinished() {
 				entry.Duration = 0
 				entry.TimeFinished = time.Time{}
+				sorted := EntrySort(*allEntries)
+				sort.Sort(&sorted)
+				log.Printf("Removed time for racer #%d", bib)
 				return nil
 			}
 			return fmt.Errorf("Cannot remove time for bib #%d, time is already removed.", bib)
@@ -857,6 +867,15 @@ func manageRaceState() {
 	log.Printf("Initialized the race")
 	for {
 		select {
+		case <-resetRaceStateChan:
+			allEntries = allEntries[:0]
+			for _, p := range prizes {
+				p.Winners = make([]*Entry, 0, p.Amount)
+			}
+			modifyNonce = 0
+			optionalEntryFields = nil
+			bibbedEntries = make(map[Bib]*Entry)
+			raceStart = time.Time{}
 		case templateReq := <-requestTemplateData:
 			if templateReq.name == "audit" {
 				modifyNonce = rand.Int()
@@ -889,11 +908,11 @@ func manageRaceState() {
 			if raceStart.IsZero() {
 				errorChan <- fmt.Errorf("Race has not started yet, cannot link a bib")
 			} else {
-				errorChan <- recordTimeForBib(bib, bibbedEntries, &allEntries, optionalEmailIndex, raceStart)
+				errorChan <- recordTimeForBib(bib, bibbedEntries, &allEntries, optionalEmailIndex, raceStart, prizes)
 			}
 		case bib := <-removeBibChan:
 			modifyNonce = 0
-			errorChan <- removeTimeForBib(bib, bibbedEntries, allEntries)
+			errorChan <- removeTimeForBib(bib, bibbedEntries, &allEntries)
 		case downloadEntries <- allEntries:
 		case downloadPrizes <- prizes:
 		}
@@ -931,7 +950,6 @@ func main() {
 	log.Printf("Admin - http://localhost:%s/admin", portNum)
 	log.Printf("Audit - http://localhost:%s/audit", portNum)
 	log.Printf("Large Screen Live Results - http://localhost:%s/results", portNum)
-	go manageRaceState()
 	req, err := uploadFile("prizes.json")
 	if err == nil {
 		resp := httptest.NewRecorder()

@@ -8,8 +8,8 @@ An application to help the timing of long distance races including registration 
 * Download race results in a combined CSV (Entries (names, tshirt size, etc) & Results (time, overall place))
 * Entering Bib # information for each racer as they cross the line
 
-RacerWii helps track racers on long distance races like a 5k.  It's meant to be a high-tech low cost way of creating and displaying race results.  It's primary use case is for fund raiser type 
+RacerWii helps track racers on long distance races like a 5k.  It's meant to be a high-tech low cost way of creating and displaying race results.  It's primary use case is for fund raiser type
 races where buying RFID chips for each runner is over the top and too costly.
 
 
-[![Build Status](https://travis-ci.org/mzimmerman/racergo.svg?branch=master)](https://travis-ci.org/mzimmerman/racergo)
+[![Coverage](http://gocover.io/_badge/github.com/mzimmerman/racergo)](http://gocover.io/github.com/mzimmerman/racergo)[![Build Status](https://travis-ci.org/mzimmerman/racergo.svg?branch=master)](https://travis-ci.org/mzimmerman/racergo)

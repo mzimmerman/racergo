@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/darkhelmet/env"
@@ -37,6 +38,30 @@ var config struct {
 type templateRequest struct {
 	name   string
 	writer io.Writer
+}
+
+type TemplatePool struct {
+	pool sync.Pool
+}
+
+func NewTemplatePool() *TemplatePool {
+	return &TemplatePool{
+		pool: sync.Pool{
+			New: func() interface{} {
+				return &bytes.Buffer{}
+			},
+		},
+	}
+}
+
+func (tp *TemplatePool) Get() *bytes.Buffer {
+	buf := tp.pool.Get().(*bytes.Buffer)
+	buf.Reset()
+	return buf
+}
+
+func (tp *TemplatePool) Put(buf *bytes.Buffer) {
+	tp.pool.Put(buf)
 }
 
 const SENDGRIDUSER = "API_USER"
@@ -702,6 +727,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	}
 	err := <-errorChan
 	if err != nil {
+		w.WriteHeader(500)
 		fmt.Fprintf(w, "Error executing template - %v", err)
 		log.Printf("Error executing template - %v", err)
 	}
@@ -809,7 +835,7 @@ func addEntry(entry Entry, bibbedEntries map[Bib]*Entry, allEntries *[]*Entry, r
 	return nil
 }
 
-func generateTemplate(req templateRequest, allEntries []*Entry, raceStart time.Time, auditLog []Audit, optionalEntryFields []string, prizes []Prize, modifyNonce int) error {
+func generateTemplate(req templateRequest, allEntries []*Entry, raceStart time.Time, auditLog []Audit, optionalEntryFields []string, prizes []Prize, modifyNonce int, tmplPool *TemplatePool) error {
 	data := map[string]interface{}{"Racers": allEntries}
 	switch req.name {
 	default:
@@ -844,8 +870,15 @@ func generateTemplate(req templateRequest, allEntries []*Entry, raceStart time.T
 		data["NextUpdate"] = diff / time.Millisecond % 1000
 	}
 	data["Prizes"] = prizes
+	buf := tmplPool.Get()
+	defer tmplPool.Put(buf)
 	raceResultsTemplate, _ = template.ParseFiles("raceResults.template")
-	return raceResultsTemplate.ExecuteTemplate(req.writer, req.name, data)
+	err := raceResultsTemplate.ExecuteTemplate(buf, req.name, data)
+	if err == nil {
+		// no errors processing the template, copy the generated data
+		io.Copy(req.writer, buf)
+	}
+	return err
 }
 
 func modifyEntry(entry Entry, index Index, bibbedEntries map[Bib]*Entry, allEntries *[]*Entry) error {
@@ -856,6 +889,7 @@ func manageRaceState() {
 	src := make(chan time.Time)
 	go listenForRacers(src)
 
+	tmplPool := NewTemplatePool()
 	var raceStart time.Time
 	var optionalEntryFields []string
 	bibbedEntries := make(map[Bib]*Entry) // map of Bib #s pointing to bibbed entries only, for link bib lookup
@@ -880,7 +914,7 @@ func manageRaceState() {
 			if templateReq.name == "audit" {
 				modifyNonce = rand.Int()
 			}
-			errorChan <- generateTemplate(templateReq, allEntries, raceStart, auditLog, optionalEntryFields, prizes, modifyNonce)
+			errorChan <- generateTemplate(templateReq, allEntries, raceStart, auditLog, optionalEntryFields, prizes, modifyNonce, tmplPool)
 		case tmp := <-setOptionalFieldsChan:
 			modifyNonce = 0
 			if optionalEntryFields == nil {
@@ -919,7 +953,7 @@ func manageRaceState() {
 	}
 }
 
-func main() {
+func init() {
 	http.HandleFunc(config.webserverHostname+"/", handler)
 	http.HandleFunc(config.webserverHostname+"/admin", handler)
 	http.HandleFunc(config.webserverHostname+"/start", startHandler)
@@ -933,6 +967,19 @@ func main() {
 	http.Handle(config.webserverHostname+"/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static/"))))
 	http.Handle(config.webserverHostname+"/fonts/", http.StripPrefix("/fonts/", http.FileServer(http.Dir("fonts/"))))
 	http.Handle("/", http.RedirectHandler("http://"+config.webserverHostname+"/", 307))
+	req, err := uploadFile("prizes.json")
+	if err == nil {
+		resp := httptest.NewRecorder()
+		uploadPrizesHandler(resp, req)
+		if resp.Code != 301 {
+			log.Println("Unable to load the default prizes.json file.")
+		}
+	} else {
+		log.Printf("Unable to load the default prizes.json file - %v\n", err)
+	}
+}
+
+func main() {
 	log.Printf("Starting http server")
 	listener, err := net.Listen("tcp", ":80")
 	if err != nil {
@@ -950,16 +997,6 @@ func main() {
 	log.Printf("Admin - http://localhost:%s/admin", portNum)
 	log.Printf("Audit - http://localhost:%s/audit", portNum)
 	log.Printf("Large Screen Live Results - http://localhost:%s/results", portNum)
-	req, err := uploadFile("prizes.json")
-	if err == nil {
-		resp := httptest.NewRecorder()
-		uploadPrizesHandler(resp, req)
-		if resp.Code != 301 {
-			log.Println("Unable to load the default prizes.json file.")
-		}
-	} else {
-		log.Printf("Unable to load the default prizes.json file - %v\n", err)
-	}
 	err = http.Serve(listener, nil)
 	if err != nil {
 		log.Fatalf("Error starting http server! - %s\n", err)

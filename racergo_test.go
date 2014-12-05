@@ -105,6 +105,25 @@ func TestLoadRacers(t *testing.T) {
 	}
 }
 
+func TestTemplates(t *testing.T) {
+	TestLink(t) // load some data
+	urls := []string{
+		"/",
+		"/audit",
+		"/results",
+		"/admin",
+	}
+	for _, u := range urls {
+		w := httptest.NewRecorder()
+		r, _ := http.NewRequest("get", u, nil)
+		handler(w, r)
+		if w.Code != http.StatusOK {
+			t.Log(w.Body.String())
+			t.Errorf("Error fetching template - %s, expected %d, got %d", u, http.StatusOK, w.Code)
+		}
+	}
+}
+
 func TestLink(t *testing.T) { // includes removing of racers
 	resetRaceStateChan <- struct{}{}
 	startRace()

@@ -108,7 +108,7 @@
 				<td>
 					{{if $.Admin}}
 						<div class="col-xs-4">{{.Place}}</div>
-						{{if .Confirmed}}
+						{{if .Entry.Confirmed}}
 							<div class="col-xs-4">
 								<form class="form-inline" role="form">
 									<fieldset disabled>
@@ -141,7 +141,7 @@
 						{{.Place}}
 					{{end}}
 				</td>
-				<td>{{.Time}}</td>
+				<td>{{.Entry.Duration}}</td>
 				<td>{{.Entry.Bib}}</td>
 				<td>{{.Entry.Fname}}</td>
 				<td>{{.Entry.Lname}}</td>
@@ -185,7 +185,7 @@
 				{{range .Audit}}
 					<tr>
 						<td>{{.Bib}}</td>
-						<td>{{.Time.String}}</td>
+						<td>{{.Duration.String}}</td>
 						<td>{{.Remove}}</td>
 					</tr>
 				{{end}}
@@ -205,22 +205,17 @@
 						{{end}}
 					</tr>
 					<tbody>
-					{{range $id , $entries := .Entries}}
+					{{range $id , $entry := .Entries}}
 						<tr>
-							{{if $entries.Result}}
-								<td>{{$entries.Result.Place}}</td>
-								<td><input class="form-control" type="text" name="{{$id}}.Time" value="{{$entries.Result.Time}}"></td>
-							{{else}}
-								<td>-</td>
-								<td>-</td>
-							{{end}}
-							<td><input class="form-control" type="number" name="{{$id}}.Bib" value="{{$entries.Bib}}"></td>
-							<td><input class="form-control" type="text" name="{{$id}}.Fname" value="{{$entries.Fname}}"></td>
-							<td><input class="form-control" type="text" name="{{$id}}.Lname" value="{{$entries.Lname}}"></td>
-							<td><input class="form-control" type="number" name="{{$id}}.Age" value="{{$entries.Age}}"></td>
-							<td><input class="form-control" type="text" name="{{$id}}.Male" value="{{if $entries.Male}}M{{else}}F{{end}}"></td>
-							{{range $idx, $opts := $entries.Optional}}
-								<td><input class="form-control" type="text" name="{{$id}}.{{index $.Fields $idx}}" value="{{index $entries.Optional $idx}}"></td>
+							<td>{{$entry.Place $id}}</td>
+							<td><input class="form-control" type="text" name="{{$id}}.Time" value="{{$entry.Duration}}"></td>
+							<td><input class="form-control" type="number" name="{{$id}}.Bib" value="{{$entry.Bib}}"></td>
+							<td><input class="form-control" type="text" name="{{$id}}.Fname" value="{{$entry.Fname}}"></td>
+							<td><input class="form-control" type="text" name="{{$id}}.Lname" value="{{$entry.Lname}}"></td>
+							<td><input class="form-control" type="number" name="{{$id}}.Age" value="{{$entry.Age}}"></td>
+							<td><input class="form-control" type="text" name="{{$id}}.Male" value="{{if $entry.Male}}M{{else}}F{{end}}"></td>
+							{{range $idx, $opts := $entry.Optional}}
+								<td><input class="form-control" type="text" name="{{$id}}.{{index $.Fields $idx}}" value="{{index $entry.Optional $idx}}"></td>
 							{{end}}
 						</tr>
 					{{end}}
@@ -240,7 +235,7 @@
 				<div class="panel-heading">{{.Title}}</div>
 				<div class="panel-body">
 					{{range .Winners}}
-						<p>{{.Entry.Fname}} {{.Entry.Lname}}<span class="pull-right">{{.Time.String}}</span></p>
+						<p>{{.Fname}} {{.Lname}}<span class="pull-right">{{.Duration.String}}</span></p>
 					{{end}}
 				</div>
 			</div>
@@ -272,13 +267,13 @@
 					<th>Last</th>
 				</tr>
 				<tbody>
-				{{range .Racers}}
+				{{range $idx, $entry := .Entries}}
 					<tr>
-						<td>{{.Place}}</td>
-						<td>{{.Time}}</td>
-						<td>{{with .Entry}}{{.Bib}}{{end}}</td>
-						<td>{{with .Entry}}{{.Fname}}{{end}}</td>
-						<td>{{with .Entry}}{{.Lname}}{{end}}</td>
+						<td>{{$entry.Place $idx}}</td>
+						<td>{{$entry.Duration}}</td>
+						<td>{{$entry.Bib}}</td>
+						<td>{{$entry.Fname}}</td>
+						<td>{{$entry.Lname}}</td>
 					</tr>
 				{{end}}
 				</tbody>

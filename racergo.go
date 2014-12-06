@@ -173,6 +173,10 @@ type Entry struct {
 	Confirmed    bool
 }
 
+func (e Entry) Place(p int) int {
+	return p + 1
+}
+
 func (e Entry) HasFinished() bool {
 	return e.Duration > 0
 }
@@ -835,14 +839,18 @@ func addEntry(entry Entry, bibbedEntries map[Bib]*Entry, allEntries *[]*Entry, r
 	return nil
 }
 
+type RecentRacer struct {
+	Entry
+	Place Place
+}
+
 func generateTemplate(req templateRequest, allEntries []*Entry, raceStart time.Time, auditLog []Audit, optionalEntryFields []string, prizes []Prize, modifyNonce int, tmplPool *TemplatePool) error {
-	data := map[string]interface{}{"Racers": allEntries}
+	data := map[string]interface{}{"Entries": allEntries}
 	switch req.name {
 	default:
 		req.name = "default"
 	case "audit":
 		data["Audit"] = auditLog
-		data["Entries"] = allEntries
 		data["Fields"] = optionalEntryFields
 		data["Nonce"] = modifyNonce
 		fallthrough
@@ -851,10 +859,13 @@ func generateTemplate(req templateRequest, allEntries []*Entry, raceStart time.T
 		fallthrough
 	case "results":
 		numRecent := 10
-		recentRacers := make([]*Entry, 0, numRecent)
+		recentRacers := make([]RecentRacer, 0, numRecent)
 		for i := len(allEntries) - 1; i >= 0; i-- {
 			if allEntries[i].HasFinished() {
-				recentRacers = append(recentRacers, allEntries[i])
+				recentRacers = append(recentRacers, RecentRacer{
+					Entry: *allEntries[i],
+					Place: Place(i + 1),
+				})
 			}
 			if len(recentRacers) == numRecent { // list no more than numRecent most recent
 				break

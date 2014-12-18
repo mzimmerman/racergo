@@ -681,6 +681,7 @@ func recomputeAllPrizes(prizes []Prize, allEntries []*Entry) {
 //}
 
 func addEntryHandler(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
 	entry := Entry{}
 	age, err := strconv.Atoi(r.FormValue("Age"))
 	if age < 0 {
@@ -694,10 +695,6 @@ func addEntryHandler(w http.ResponseWriter, r *http.Request) {
 	entry.Age = uint(age)
 	tmpBib, err := strconv.Atoi(r.FormValue("Bib"))
 	entry.Bib = Bib(tmpBib)
-	if entry.Bib < 0 {
-		showErrorForAdmin(w, r.Referer(), "Not a valid bib, must be >= 0")
-		return
-	}
 	if err != nil {
 		showErrorForAdmin(w, r.Referer(), "Error %s getting Bib", err)
 		return

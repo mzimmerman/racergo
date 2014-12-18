@@ -106,12 +106,66 @@ func TestLoadRacers(t *testing.T) {
 }
 
 func TestTemplates(t *testing.T) {
-	TestLink(t) // load some data
+	resetRaceStateChan <- struct{}{}
 	urls := []string{
 		"/",
 		"/audit",
 		"/results",
 		"/admin",
+	}
+	for _, u := range urls {
+		w := httptest.NewRecorder()
+		r, _ := http.NewRequest("get", u, nil)
+		handler(w, r)
+		if w.Code != http.StatusOK {
+			t.Log(w.Body.String())
+			t.Errorf("Error fetching template - %s, expected %d, got %d", u, http.StatusOK, w.Code)
+		}
+	}
+	optionalEntryFields := []string{"Email", "Large"}
+	setOptionalFieldsChan <- optionalEntryFields
+	err := <-errorChan
+	if err != nil {
+		t.Errorf("Nil expected, got %v", err)
+	}
+	users := []Entry{
+		Entry{-1, "A", "B", true, 15, []string{"userA@host.com", "Large"}, 0, time.Time{}, true},
+		Entry{-1, "C", "D", false, 25, []string{"userC@host.com", "Medium"}, 0, time.Time{}, true},
+		Entry{-1, "E", "F", true, 30, []string{"userE@host.com", "Small"}, 0, time.Time{}, true},
+		Entry{5, "G", "H", false, 35, []string{"userG@host.com", "XSmall"}, 0, time.Time{}, true},
+	}
+	for _, u := range users {
+		t.Logf("Adding entry - %v", u)
+		addTestEntry(t, &u, optionalEntryFields)
+	}
+	for _, u := range urls {
+		w := httptest.NewRecorder()
+		r, _ := http.NewRequest("get", u, nil)
+		handler(w, r)
+		if w.Code != http.StatusOK {
+			t.Log(w.Body.String())
+			t.Errorf("Error fetching template - %s, expected %d, got %d", u, http.StatusOK, w.Code)
+		}
+	}
+	startRace()
+	for _, u := range urls {
+		w := httptest.NewRecorder()
+		r, _ := http.NewRequest("get", u, nil)
+		handler(w, r)
+		if w.Code != http.StatusOK {
+			t.Log(w.Body.String())
+			t.Errorf("Error fetching template - %s, expected %d, got %d", u, http.StatusOK, w.Code)
+		}
+	}
+	users = []Entry{
+		Entry{1, "H", "I", true, 15, []string{"userA@host.com", "Large"}, 0, time.Time{}, true},
+		Entry{2, "J", "K", false, 25, []string{"userC@host.com", "Medium"}, 0, time.Time{}, true},
+		Entry{3, "L", "M", true, 30, []string{"userE@host.com", "Small"}, 0, time.Time{}, true},
+		Entry{4, "N", "O", false, 35, []string{"userG@host.com", "XSmall"}, 0, time.Time{}, true},
+	}
+	for _, u := range users {
+		t.Logf("Adding entry - %v", u)
+		addTestEntry(t, &u, optionalEntryFields)
 	}
 	for _, u := range urls {
 		w := httptest.NewRecorder()

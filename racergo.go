@@ -67,38 +67,13 @@ func (tp *TemplatePool) Put(buf *bytes.Buffer) {
 const SENDGRIDUSER = "API_USER"
 const SENDGRIDPASS = "API_PASS"
 
+var serverHandlers chan struct{}
 var raceResultsTemplate *template.Template
 var errorTemplate *template.Template
-var serverHandlers chan struct{}
-
-var linkBibChan = make(chan Bib)
-var removeBibChan = make(chan Bib)
-var addEntryChan = make(chan Entry)
-var prizesChan = make(chan []Prize)
-var downloadEntries = make(chan []*Entry)
-var downloadPrizes = make(chan []Prize)
-var requestTemplateData = make(chan templateRequest)
-var modifyEntryChan = make(chan struct {
-	entry Entry
-	index Index
-	nonce int
-})
-var resetRaceStateChan = make(chan struct{})
-
-//var swapInNewChan = make(chan struct {
-//	allEntries    []Entry
-//	bibbedEntries map[Bib]*Entry
-//})
-var setOptionalFieldsChan = make(chan []string)
-var getOptionalFieldsChan = make(chan []string)
-var modifyEntriesChan = make(chan struct {
-	e Entry
-	i Index
-})
-var startRaceChan = make(chan time.Time)
-var errorChan = make(chan error)
+var tmplPool *TemplatePool
 
 func init() {
+	tmplPool = NewTemplatePool()
 	config.webserverHostname = env.StringDefault("RACERGOHOSTNAME", "localhost:8080")
 	config.sendgriduser = env.StringDefault("RACERGOSENDGRIDUSER", SENDGRIDUSER)
 	config.sendgridpass = env.StringDefault("RACERGOSENDGRIDPASS", SENDGRIDPASS)
@@ -126,7 +101,6 @@ func init() {
 		log.Fatalf("Error parsing template! - %s\n", err)
 		return
 	}
-	go manageRaceState()
 }
 
 const NoBib Bib = -1
@@ -261,19 +235,12 @@ func ParseHumanDuration(val string) (HumanDuration, error) {
 	return duration, nil
 }
 
-func downloadHandler(w http.ResponseWriter, r *http.Request) {
+func downloadHandler(w http.ResponseWriter, r *http.Request, race *Race) {
 	filename := fmt.Sprintf(config.webserverHostname+"-%s.csv", time.Now().In(time.Local).Format("2006-01-02"))
 	w.Header().Set("Content-type", "application/csv")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
-	entries := <-downloadEntries
-	csvData := make([][]string, 0, len(entries)+1)
-	headerRow := append([]string{"Fname", "Lname", "Age", "Gender", "Bib", "Overall Place", "Duration", "Time Finished"}, <-getOptionalFieldsChan...)
-	csvData = append(csvData, headerRow)
-	for place, entry := range entries {
-		csvData = append(csvData, append([]string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), gender(entry.Male), entry.Bib.String(), strconv.Itoa(place + 1), entry.Duration.String(), entry.TimeFinished.Format(time.ANSIC)}, entry.Optional...))
-	}
 	writer := csv.NewWriter(w)
-	writer.WriteAll(csvData)
+	race.WriteCSV(writer)
 	writer.Flush()
 }
 
@@ -284,7 +251,7 @@ func gender(male bool) string {
 	return "F"
 }
 
-func uploadPrizesHandler(w http.ResponseWriter, r *http.Request) {
+func uploadPrizesHandler(w http.ResponseWriter, r *http.Request, race *Race) {
 	reader, err := r.MultipartReader()
 	if err != nil {
 		showErrorForAdmin(w, r.Referer(), "Error getting Reader - %s", err)
@@ -309,7 +276,7 @@ func uploadPrizesHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		newPrizes = append(newPrizes, prize)
 	}
-	prizesChan <- newPrizes
+	race.SetPrizes(newPrizes)
 	http.Redirect(w, r, "/admin", 301)
 }
 
@@ -337,7 +304,7 @@ func calculatePrizes(r *Entry, prizes []Prize) {
 	}
 }
 
-func uploadRacersHandler(w http.ResponseWriter, r *http.Request) {
+func uploadRacersHandler(w http.ResponseWriter, r *http.Request, race *Race) {
 	reader, err := r.MultipartReader()
 	if err != nil {
 		showErrorForAdmin(w, r.Referer(), "Error getting Reader - %s", err)
@@ -360,8 +327,8 @@ func uploadRacersHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// make the new in-memory data stores and unlink all previous relationships
-	newBibbedEntries := make(map[Bib]*Entry)
-	newAllEntries := make([]*Entry, 0, 1024)
+	newBibbedEntries := make(map[Bib]Entry)
+	newAllEntries := make([]Entry, 0, 1024)
 	// initialize the optionalEntryFields for use when we export/display the data
 	newOptionalEntryFields := make([]string, 0)
 	mandatoryFields := map[string]struct{}{
@@ -391,7 +358,7 @@ func uploadRacersHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// load the data
 	for row := 1; row < len(rawEntries); row++ {
-		entry := &Entry{Bib: -1}
+		entry := Entry{Bib: -1}
 		entry.Optional = make([]string, 0)
 		for col := range rawEntries[row] {
 			switch rawEntries[0][col] {
@@ -424,21 +391,18 @@ func uploadRacersHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		newAllEntries = append(newAllEntries, entry)
 	}
-	setOptionalFieldsChan <- newOptionalEntryFields
-	err = <-errorChan
+	err = race.SetOptionalFields(newOptionalEntryFields)
 	if err != nil {
 		showErrorForAdmin(w, r.Referer(), "%v", err)
 		return
 	}
 	for _, e := range newAllEntries {
-		addEntryChan <- *e
-		err = <-errorChan
+		err = race.AddEntry(e)
 		if err != nil {
 			showErrorForAdmin(w, r.Referer(), "%v - partial import", err)
 			return
 		}
 	}
-
 	http.Redirect(w, r, "/admin", 301)
 }
 
@@ -513,12 +477,12 @@ func uploadRacersHandler(w http.ResponseWriter, r *http.Request) {
 //	http.Redirect(w, r, "/audit", 301)
 //}
 
-func startHandler(w http.ResponseWriter, r *http.Request) {
-	startRaceChan <- time.Now()
+func startHandler(w http.ResponseWriter, r *http.Request, race *Race) {
+	race.Start()
 	http.Redirect(w, r, "/admin", 301)
 }
 
-func linkBibHandler(w http.ResponseWriter, r *http.Request) {
+func linkBibHandler(w http.ResponseWriter, r *http.Request, race *Race) {
 	removeBib := r.FormValue("remove") == "true"
 	tmpBib, err := strconv.Atoi(r.FormValue("bib"))
 	if err != nil {
@@ -531,11 +495,10 @@ func linkBibHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	bib := Bib(tmpBib)
 	if removeBib {
-		removeBibChan <- bib
+		err = race.RemoveTimeForBib(bib)
 	} else {
-		linkBibChan <- bib
+		err = race.RecordTimeForBib(bib)
 	}
-	err = <-errorChan
 	if err != nil {
 		showErrorForAdmin(w, r.Referer(), "%v", err)
 		return
@@ -680,7 +643,7 @@ func recomputeAllPrizes(prizes []Prize, allEntries []*Entry) {
 //	return
 //}
 
-func addEntryHandler(w http.ResponseWriter, r *http.Request) {
+func addEntryHandler(w http.ResponseWriter, r *http.Request, race *Race) {
 	r.ParseForm()
 	entry := Entry{}
 	age, err := strconv.Atoi(r.FormValue("Age"))
@@ -703,12 +666,11 @@ func addEntryHandler(w http.ResponseWriter, r *http.Request) {
 	entry.Lname = r.FormValue("Lname")
 	entry.Male = r.FormValue("Male") == "true"
 	entry.Optional = make([]string, 0)
-	optionalEntryFields := <-getOptionalFieldsChan
+	optionalEntryFields := race.GetOptionalFields()
 	for _, s := range optionalEntryFields {
 		entry.Optional = append(entry.Optional, r.FormValue(s))
 	}
-	addEntryChan <- entry
-	err = <-errorChan
+	err = race.AddEntry(entry)
 	if err != nil {
 		showErrorForAdmin(w, r.Referer(), "%v", err)
 		return
@@ -717,16 +679,15 @@ func addEntryHandler(w http.ResponseWriter, r *http.Request) {
 	return
 }
 
-func handler(w http.ResponseWriter, r *http.Request) {
+func handler(w http.ResponseWriter, r *http.Request, race *Race) {
 	<-serverHandlers // wait until a goroutine to handle http requests is free
 	defer func() {
 		serverHandlers <- struct{}{} // wait for handler to finish, then put it back in the queue so another handler can work
 	}()
-	requestTemplateData <- templateRequest{
+	err := race.GenerateTemplate(templateRequest{
 		name:   strings.Trim(r.URL.Path, "/"),
 		writer: w,
-	}
-	err := <-errorChan
+	})
 	if err != nil {
 		w.WriteHeader(500)
 		fmt.Fprintf(w, "Error executing template - %v", err)
@@ -766,21 +727,26 @@ func uploadFile(filename string) (*http.Request, error) {
 	//io.Copy(os.Stderr, res.Body) // Replace this with Status.Code check
 }
 
-func recordTimeForBib(bib Bib, bibbedEntries map[Bib]*Entry, allEntries *[]*Entry, emailFieldIndex int, raceStart time.Time, prizes []Prize) error {
-	if entry, ok := bibbedEntries[bib]; ok {
+func (race *Race) RecordTimeForBib(bib Bib) error {
+	race.Lock()
+	defer race.Unlock()
+	if race.started.IsZero() {
+		return fmt.Errorf("Race has not started yet, cannot link a bib")
+	}
+	if entry, ok := race.bibbedEntries[bib]; ok {
 		if !entry.Confirmed {
 			if entry.HasFinished() {
 				entry.Confirmed = true
 				log.Printf("Bib #%d confirmed with duration - %s", bib, entry.Duration)
 				// TODO: Verify that every entry before them is *also* confirmed, otherwise their finishing place could be wrong
-				recomputeAllPrizes(prizes, *allEntries)
-				go sendEmailResponse(*entry, entry.Duration, emailFieldIndex)
+				recomputeAllPrizes(race.prizes, race.allEntries)
+				go sendEmailResponse(*entry, entry.Duration, race.optionalEmailIndex)
 				return nil
 			}
 			now := time.Now()
-			entry.Duration = HumanDuration(now.Sub(raceStart))
+			entry.Duration = HumanDuration(now.Sub(race.started))
 			entry.TimeFinished = now
-			sorted := EntrySort(*allEntries)
+			sorted := EntrySort(race.allEntries)
 			sort.Sort(&sorted)
 			log.Printf("Bib #%d linked with duration - %s", bib, entry.Duration)
 			return nil
@@ -790,15 +756,18 @@ func recordTimeForBib(bib Bib, bibbedEntries map[Bib]*Entry, allEntries *[]*Entr
 	return fmt.Errorf("Bib %d not found", bib)
 }
 
-func removeTimeForBib(bib Bib, bibbedEntries map[Bib]*Entry, allEntries *[]*Entry) error {
-	if entry, ok := bibbedEntries[bib]; ok {
+func (race *Race) RemoveTimeForBib(bib Bib) error {
+	race.Lock()
+	defer race.Unlock()
+	if entry, ok := race.bibbedEntries[bib]; ok {
 		if !entry.Confirmed {
 			if entry.HasFinished() {
 				entry.Duration = 0
 				entry.TimeFinished = time.Time{}
-				sorted := EntrySort(*allEntries)
+				sorted := EntrySort(race.allEntries)
 				sort.Sort(&sorted)
 				log.Printf("Removed time for racer #%d", bib)
+				race.modifyNonce = 0
 				return nil
 			}
 			return fmt.Errorf("Cannot remove time for bib #%d, time is already removed.", bib)
@@ -808,48 +777,53 @@ func removeTimeForBib(bib Bib, bibbedEntries map[Bib]*Entry, allEntries *[]*Entr
 	return fmt.Errorf("Bib %d not found", bib)
 }
 
-func addEntry(entry Entry, bibbedEntries map[Bib]*Entry, allEntries *[]*Entry, raceStart time.Time) error {
+func (race *Race) AddEntry(entry Entry) error {
+	race.Lock()
+	defer race.Unlock()
 	if entry.Fname == "" {
 		return fmt.Errorf("Entry missing first name!")
 	}
 	if entry.Lname == "" {
 		return fmt.Errorf("Entry missing last name!")
 	}
-	if raceStart.IsZero() {
+	if race.started.IsZero() {
 		entry.Confirmed = false
 		entry.Duration = 0
 		entry.Confirmed = false
 	}
 	if entry.Bib >= 0 {
-		if _, ok := bibbedEntries[entry.Bib]; ok {
+		if _, ok := race.bibbedEntries[entry.Bib]; ok {
 			return fmt.Errorf("Entry already exists for bib #%d", entry.Bib)
 		}
-		*allEntries = append(*allEntries, &entry)
-		bibbedEntries[entry.Bib] = &entry
+		race.allEntries = append(race.allEntries, &entry)
+		race.bibbedEntries[entry.Bib] = &entry
 	} else {
-		if !raceStart.IsZero() {
+		if !race.started.IsZero() {
 			return fmt.Errorf("Entry does not contain a bib # and the race has started!")
 		}
-		*allEntries = append(*allEntries, &entry)
+		race.allEntries = append(race.allEntries, &entry)
 	}
 	log.Printf("Added Entry - %#v\n", entry)
 	return nil
 }
 
 type RecentRacer struct {
-	Entry
+	*Entry
 	Place Place
 }
 
-func generateTemplate(req templateRequest, allEntries []*Entry, raceStart time.Time, auditLog []Audit, optionalEntryFields []string, prizes []Prize, modifyNonce int, tmplPool *TemplatePool) error {
-	data := map[string]interface{}{"Entries": allEntries}
+func (race *Race) GenerateTemplate(req templateRequest) error {
+	race.Lock()
+	defer race.Unlock()
+	data := map[string]interface{}{"Entries": race.allEntries}
 	switch req.name {
 	default:
 		req.name = "default"
 	case "audit":
-		data["Audit"] = auditLog
-		data["Fields"] = optionalEntryFields
-		data["Nonce"] = modifyNonce
+		race.modifyNonce = rand.Int()
+		data["Audit"] = race.auditLog
+		data["Fields"] = race.optionalEntryFields
+		data["Nonce"] = race.modifyNonce
 		fallthrough
 	case "admin":
 		data["Admin"] = true
@@ -857,10 +831,10 @@ func generateTemplate(req templateRequest, allEntries []*Entry, raceStart time.T
 	case "results":
 		numRecent := 10
 		recentRacers := make([]RecentRacer, 0, numRecent)
-		for i := len(allEntries) - 1; i >= 0; i-- {
-			if allEntries[i].HasFinished() {
+		for i := len(race.allEntries) - 1; i >= 0; i-- {
+			if race.allEntries[i].HasFinished() {
 				recentRacers = append(recentRacers, RecentRacer{
-					Entry: *allEntries[i],
+					Entry: race.allEntries[i],
 					Place: Place(i + 1),
 				})
 			}
@@ -870,14 +844,14 @@ func generateTemplate(req templateRequest, allEntries []*Entry, raceStart time.T
 		}
 		data["RecentRacers"] = recentRacers
 	}
-	if !raceStart.IsZero() {
-		diff := time.Since(raceStart)
-		data["Start"] = raceStart.Format("3:04:05")
+	if !race.started.IsZero() {
+		diff := time.Since(race.started)
+		data["Start"] = race.started.Format("3:04:05")
 		data["Time"] = HumanDuration(diff).Clock()
 		data["Seconds"] = fmt.Sprintf("%.0f", diff.Seconds())
 		data["NextUpdate"] = diff / time.Millisecond % 1000
 	}
-	data["Prizes"] = prizes
+	data["Prizes"] = race.prizes
 	buf := tmplPool.Get()
 	defer tmplPool.Put(buf)
 	raceResultsTemplate, _ = template.ParseFiles("raceResults.template")
@@ -893,84 +867,113 @@ func modifyEntry(entry Entry, index Index, bibbedEntries map[Bib]*Entry, allEntr
 	return nil
 }
 
-func manageRaceState() {
-	src := make(chan time.Time)
-	go listenForRacers(src)
-
-	tmplPool := NewTemplatePool()
-	var raceStart time.Time
-	var optionalEntryFields []string
-	bibbedEntries := make(map[Bib]*Entry) // map of Bib #s pointing to bibbed entries only, for link bib lookup
-	allEntries := make([]*Entry, 0, 1024) // a sorted slice of all Entries, bibbed and unbibbed, w/ result or not, sorted by Place (first to last)
-	auditLog := make([]Audit, 0, 1024)    // A writeonly location to record the actions/events of the race
-	prizes := make([]Prize, 0, 48)
-	modifyNonce := 0
-	optionalEmailIndex := -1 // initialize it to an invalid value
-	log.Printf("Initialized the race")
-	for {
-		select {
-		case <-resetRaceStateChan:
-			allEntries = allEntries[:0]
-			for _, p := range prizes {
-				p.Winners = make([]*Entry, 0, p.Amount)
-			}
-			modifyNonce = 0
-			optionalEntryFields = nil
-			bibbedEntries = make(map[Bib]*Entry)
-			raceStart = time.Time{}
-		case templateReq := <-requestTemplateData:
-			if templateReq.name == "audit" {
-				modifyNonce = rand.Int()
-			}
-			errorChan <- generateTemplate(templateReq, allEntries, raceStart, auditLog, optionalEntryFields, prizes, modifyNonce, tmplPool)
-		case tmp := <-setOptionalFieldsChan:
-			modifyNonce = 0
-			if optionalEntryFields == nil {
-				optionalEntryFields = tmp
-				errorChan <- nil
-			} else {
-				errorChan <- fmt.Errorf("Optional entry fields are already set")
-			}
-		case getOptionalFieldsChan <- optionalEntryFields:
-		case prizes = <-prizesChan:
-			recomputeAllPrizes(prizes, allEntries)
-		case raceStart = <-startRaceChan:
-			src <- raceStart
-		case mod := <-modifyEntryChan:
-			if mod.nonce != modifyNonce {
-				errorChan <- fmt.Errorf("Error updating entry - audit record was out of date, try your change again")
-			} else {
-				errorChan <- modifyEntry(mod.entry, mod.index, bibbedEntries, &allEntries)
-			}
-			modifyNonce = 0
-		case entry := <-addEntryChan:
-			errorChan <- addEntry(entry, bibbedEntries, &allEntries, raceStart)
-		case bib := <-linkBibChan:
-			modifyNonce = 0
-			if raceStart.IsZero() {
-				errorChan <- fmt.Errorf("Race has not started yet, cannot link a bib")
-			} else {
-				errorChan <- recordTimeForBib(bib, bibbedEntries, &allEntries, optionalEmailIndex, raceStart, prizes)
-			}
-		case bib := <-removeBibChan:
-			modifyNonce = 0
-			errorChan <- removeTimeForBib(bib, bibbedEntries, &allEntries)
-		case downloadEntries <- allEntries:
-		case downloadPrizes <- prizes:
-		}
-	}
+type Race struct {
+	started             time.Time
+	startRaceChan       chan time.Time
+	optionalEntryFields []string
+	bibbedEntries       map[Bib]*Entry // map of Bib #s pointing to bibbed entries only, for link bib lookup
+	allEntries          []*Entry       // a sorted slice of all Entries, bibbed and unbibbed, w/ result or not, sorted by Place (first to last)
+	auditLog            []Audit        // A writeonly location to record the actions/events of the race
+	prizes              []Prize
+	modifyNonce         int
+	optionalEmailIndex  int
+	sync.RWMutex
 }
 
+func NewRace() *Race {
+	start := make(chan time.Time)
+	go listenForRacers(start)
+	race := &Race{
+		startRaceChan:      start,
+		bibbedEntries:      make(map[Bib]*Entry),
+		allEntries:         make([]*Entry, 0, 1024),
+		auditLog:           make([]Audit, 0, 1024),
+		prizes:             make([]Prize, 0, 48),
+		optionalEmailIndex: -1, // initialize it to an invalid value
+	}
+	log.Printf("Initialized the race")
+	return race
+}
+
+func (race *Race) WriteCSV(writer *csv.Writer) error {
+	race.Lock()
+	defer race.Unlock()
+	err := writer.Write(append([]string{"Fname", "Lname", "Age", "Gender", "Bib", "Overall Place", "Duration", "Time Finished"}, race.optionalEntryFields...))
+	if err != nil {
+		return err
+	}
+	for place, entry := range race.allEntries {
+		err = writer.Write(append([]string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), gender(entry.Male), entry.Bib.String(), strconv.Itoa(place + 1), entry.Duration.String(), entry.TimeFinished.Format(time.ANSIC)}, entry.Optional...))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (race *Race) SetOptionalFields(of []string) error {
+	race.Lock()
+	defer race.Unlock()
+	if race.optionalEntryFields == nil {
+		race.optionalEntryFields = of
+		race.modifyNonce = 0
+		return nil
+	}
+	return fmt.Errorf("Optional entry fields are already set!")
+}
+
+func (race *Race) GetOptionalFields() []string {
+	race.RLock()
+	defer race.RUnlock()
+	dst := make([]string, len(race.optionalEntryFields))
+	copy(dst, race.optionalEntryFields)
+	return dst
+}
+
+func (race *Race) SetPrizes(prizes []Prize) {
+	race.Lock()
+	defer race.Unlock()
+	race.prizes = prizes
+	recomputeAllPrizes(race.prizes, race.allEntries)
+}
+
+func (race *Race) Start() {
+	race.Lock()
+	defer race.Unlock()
+	race.started = time.Now()
+	race.startRaceChan <- race.started
+}
+
+func (race *Race) ModifyEntry(nonce int, mod Entry) error {
+	race.Lock()
+	defer race.Unlock()
+	if nonce != race.modifyNonce {
+		return fmt.Errorf("Error updating entry - audit record was out of date, try your change again")
+	}
+	// TODO: implement modify
+	race.modifyNonce = 0
+	return nil
+}
+
+type RaceHandler func(http.ResponseWriter, *http.Request, *Race)
+
+func (rh RaceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	rh(w, r, globalRace)
+}
+
+var globalRace *Race // only used in/from main(), not from testing
+
 func init() {
-	http.HandleFunc(config.webserverHostname+"/", handler)
-	http.HandleFunc(config.webserverHostname+"/admin", handler)
-	http.HandleFunc(config.webserverHostname+"/start", startHandler)
-	http.HandleFunc(config.webserverHostname+"/linkBib", linkBibHandler)
+	globalRace = NewRace()
+	http.Handle(config.webserverHostname+"/", RaceHandler(handler))
+	http.Handle(config.webserverHostname+"/admin", RaceHandler(handler))
+	http.Handle(config.webserverHostname+"/start", RaceHandler(startHandler))
+	http.Handle(config.webserverHostname+"/linkBib", RaceHandler(linkBibHandler))
 	//http.HandleFunc(config.webserverHostname+"/assignBib", assignBibHandler)
-	http.HandleFunc(config.webserverHostname+"/addEntry", addEntryHandler)
-	http.HandleFunc(config.webserverHostname+"/download", downloadHandler)
-	http.HandleFunc(config.webserverHostname+"/uploadRacers", uploadRacersHandler)
-	http.HandleFunc(config.webserverHostname+"/uploadPrizes", uploadPrizesHandler)
+	http.Handle(config.webserverHostname+"/addEntry", RaceHandler(addEntryHandler))
+	http.Handle(config.webserverHostname+"/download", RaceHandler(downloadHandler))
+	http.Handle(config.webserverHostname+"/uploadRacers", RaceHandler(uploadRacersHandler))
+	http.Handle(config.webserverHostname+"/uploadPrizes", RaceHandler(uploadPrizesHandler))
 	//http.HandleFunc(config.webserverHostname+"/auditPost", auditPostHandler)
 	http.Handle(config.webserverHostname+"/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static/"))))
 	http.Handle(config.webserverHostname+"/fonts/", http.StripPrefix("/fonts/", http.FileServer(http.Dir("fonts/"))))
@@ -978,7 +981,7 @@ func init() {
 	req, err := uploadFile("prizes.json")
 	if err == nil {
 		resp := httptest.NewRecorder()
-		uploadPrizesHandler(resp, req)
+		uploadPrizesHandler(resp, req, globalRace)
 		if resp.Code != 301 {
 			log.Println("Unable to load the default prizes.json file.")
 		}

@@ -10,13 +10,13 @@ import (
 	"time"
 )
 
-func startRace() {
+func startRace(race *Race) {
 	r, _ := http.NewRequest("get", "/start", nil)
 	w := httptest.NewRecorder()
-	startHandler(w, r)
+	startHandler(w, r, race)
 }
 
-func addTestEntry(t *testing.T, e *Entry, optionalEntryFields []string) {
+func addTestEntry(race *Race, t *testing.T, e *Entry, optionalEntryFields []string) {
 	values := make(url.Values)
 	values.Add("Bib", strconv.Itoa(int(e.Bib)))
 	values.Add("Age", strconv.Itoa(int(e.Age)))
@@ -31,15 +31,15 @@ func addTestEntry(t *testing.T, e *Entry, optionalEntryFields []string) {
 		t.Fatalf("Error creating request - %v", err)
 	}
 	w := httptest.NewRecorder()
-	addEntryHandler(w, r)
+	addEntryHandler(w, r, race)
 	if w.Code != http.StatusMovedPermanently {
 		t.Errorf("Wrong status received on add entry - %v, got %d, %s", *e, w.Code, w.Body.String())
 	}
 }
 
 func TestDownloadAndAudit(t *testing.T) {
-	resetRaceStateChan <- struct{}{}
-	startRace()
+	race := NewRace()
+	startRace(race)
 	optionalEntryFields := []string{"Email", "Large"}
 	raceStart := time.Now().Add(-time.Hour)
 	users := []Entry{
@@ -49,19 +49,19 @@ func TestDownloadAndAudit(t *testing.T) {
 		Entry{4, "G", "H", false, 35, []string{"userG@host.com", "XSmall"}, HumanDuration(time.Millisecond), raceStart.Add(time.Millisecond), true},
 	}
 	for _, u := range users {
-		addTestEntry(t, &u, optionalEntryFields)
+		addTestEntry(race, t, &u, optionalEntryFields)
 	}
 	r, _ := http.NewRequest("GET", "/download", nil)
 	w := httptest.NewRecorder()
-	downloadHandler(w, r)
+	downloadHandler(w, r, race)
 	// TODO: validate downloaded file
 	// TODO: link bibs, validate
 	// TODO: change results through audit post, validate
 }
 
 func TestLoadRacers(t *testing.T) {
-	resetRaceStateChan <- struct{}{}
-	startRace()
+	race := NewRace()
+	startRace(race)
 	// race is started, load the racers
 	req, err := uploadFile("test_runners.csv")
 	if err != nil {
@@ -71,12 +71,13 @@ func TestLoadRacers(t *testing.T) {
 		t.Fatalf("Unexpected nil request")
 	}
 	w := httptest.NewRecorder()
-	uploadRacersHandler(w, req)
+	uploadRacersHandler(w, req, race)
 	if w.Code != 301 {
-		t.Errorf("Expected redirect, got %d", w.Code)
+		t.Errorf("Expected redirect, got %d, %s", w.Code, w.Body.String())
 	}
 
-	resetRaceStateChan <- struct{}{}
+	race = NewRace()
+	startRace(race)
 	req, err = uploadFile("test_runners2.csv")
 	if err != nil {
 		t.Errorf("Unexpected error - %v", err)
@@ -85,12 +86,26 @@ func TestLoadRacers(t *testing.T) {
 		t.Fatalf("Unexpected nil request")
 	}
 	w = httptest.NewRecorder()
-	uploadRacersHandler(w, req)
-	if w.Code != 301 {
-		t.Errorf("Expected redirect, got %d", w.Code)
+	uploadRacersHandler(w, req, race)
+	if w.Code != 409 {
+		t.Errorf("Expected error for started race and entries without bibs, got %d, %s", w.Code, w.Body.String())
 	}
 
-	resetRaceStateChan <- struct{}{}
+	race = NewRace()
+	req, err = uploadFile("test_runners2.csv")
+	if err != nil {
+		t.Errorf("Unexpected error - %v", err)
+	}
+	if req == nil {
+		t.Fatalf("Unexpected nil request")
+	}
+	w = httptest.NewRecorder()
+	uploadRacersHandler(w, req, race)
+	if w.Code != 301 {
+		t.Errorf("Expected redirect, got %d, %s", w.Code, w.Body.String())
+	}
+	race = NewRace()
+	startRace(race)
 	req, err = uploadFile("test_runners3.csv")
 	if err != nil {
 		t.Errorf("Unexpected error - %v", err)
@@ -99,14 +114,29 @@ func TestLoadRacers(t *testing.T) {
 		t.Fatalf("Unexpected nil request")
 	}
 	w = httptest.NewRecorder()
-	uploadRacersHandler(w, req)
-	if w.Code != 301 {
-		t.Errorf("Expected redirect, got %d", w.Code)
+	uploadRacersHandler(w, req, race)
+	if w.Code != 409 {
+		t.Errorf("Expected error for started race and entries without bibs, got %d, %s", w.Code, w.Body.String())
 	}
+
+	race = NewRace()
+	req, err = uploadFile("test_runners3.csv")
+	if err != nil {
+		t.Errorf("Unexpected error - %v", err)
+	}
+	if req == nil {
+		t.Fatalf("Unexpected nil request")
+	}
+	w = httptest.NewRecorder()
+	uploadRacersHandler(w, req, race)
+	if w.Code != 301 {
+		t.Errorf("Expected redirect, got %d, %s", w.Code, w.Body.String())
+	}
+
 }
 
 func TestTemplates(t *testing.T) {
-	resetRaceStateChan <- struct{}{}
+	race := NewRace()
 	urls := []string{
 		"/",
 		"/audit",
@@ -116,15 +146,14 @@ func TestTemplates(t *testing.T) {
 	for _, u := range urls {
 		w := httptest.NewRecorder()
 		r, _ := http.NewRequest("get", u, nil)
-		handler(w, r)
+		handler(w, r, race)
 		if w.Code != http.StatusOK {
 			t.Log(w.Body.String())
 			t.Errorf("Error fetching template - %s, expected %d, got %d", u, http.StatusOK, w.Code)
 		}
 	}
 	optionalEntryFields := []string{"Email", "Large"}
-	setOptionalFieldsChan <- optionalEntryFields
-	err := <-errorChan
+	err := race.SetOptionalFields(optionalEntryFields)
 	if err != nil {
 		t.Errorf("Nil expected, got %v", err)
 	}
@@ -136,22 +165,22 @@ func TestTemplates(t *testing.T) {
 	}
 	for _, u := range users {
 		t.Logf("Adding entry - %v", u)
-		addTestEntry(t, &u, optionalEntryFields)
+		addTestEntry(race, t, &u, optionalEntryFields)
 	}
 	for _, u := range urls {
 		w := httptest.NewRecorder()
 		r, _ := http.NewRequest("get", u, nil)
-		handler(w, r)
+		handler(w, r, race)
 		if w.Code != http.StatusOK {
 			t.Log(w.Body.String())
 			t.Errorf("Error fetching template - %s, expected %d, got %d", u, http.StatusOK, w.Code)
 		}
 	}
-	startRace()
+	startRace(race)
 	for _, u := range urls {
 		w := httptest.NewRecorder()
 		r, _ := http.NewRequest("get", u, nil)
-		handler(w, r)
+		handler(w, r, race)
 		if w.Code != http.StatusOK {
 			t.Log(w.Body.String())
 			t.Errorf("Error fetching template - %s, expected %d, got %d", u, http.StatusOK, w.Code)
@@ -165,12 +194,12 @@ func TestTemplates(t *testing.T) {
 	}
 	for _, u := range users {
 		t.Logf("Adding entry - %v", u)
-		addTestEntry(t, &u, optionalEntryFields)
+		addTestEntry(race, t, &u, optionalEntryFields)
 	}
 	for _, u := range urls {
 		w := httptest.NewRecorder()
 		r, _ := http.NewRequest("get", u, nil)
-		handler(w, r)
+		handler(w, r, race)
 		if w.Code != http.StatusOK {
 			t.Log(w.Body.String())
 			t.Errorf("Error fetching template - %s, expected %d, got %d", u, http.StatusOK, w.Code)
@@ -179,8 +208,8 @@ func TestTemplates(t *testing.T) {
 }
 
 func TestLink(t *testing.T) { // includes removing of racers
-	resetRaceStateChan <- struct{}{}
-	startRace()
+	race := NewRace()
+	startRace(race)
 	// race is started, load the racers
 	req, err := uploadFile("test_runners.csv")
 	if err != nil {
@@ -190,7 +219,7 @@ func TestLink(t *testing.T) { // includes removing of racers
 		t.Fatalf("Unexpected nil request")
 	}
 	w := httptest.NewRecorder()
-	uploadRacersHandler(w, req)
+	uploadRacersHandler(w, req, race)
 	if w.Code != 301 {
 		t.Errorf("Expected redirect, got %d", w.Code)
 	}
@@ -235,26 +264,28 @@ func TestLink(t *testing.T) { // includes removing of racers
 			t.Errorf("Unexpected error - %v", err)
 		}
 		w := httptest.NewRecorder()
-		linkBibHandler(w, req)
+		linkBibHandler(w, req, race)
 		if x.code != w.Code {
 			t.Errorf("Iteration - %d, Expected %d, got %d - %s", i, x.code, w.Code, w.Body.Bytes())
 		}
 		if x.bib <= 0 || x.remove {
 			continue
 		}
-		results := <-downloadEntries
+		race.RLock()
+		results := race.allEntries
 		if results[x.place-1].Confirmed != x.confirmed {
 			t.Errorf("Iteration - %d, Result %v confirmed != %v", i, results[x.place-1], x.confirmed)
 		}
 		if results[x.place-1].Bib != x.bib {
 			t.Errorf("Iteration - %d, Entry %v is not in place %d", i, results[x.place-1], x.place)
 		}
+		race.RUnlock()
 	}
 }
 
 func TestPrizes(t *testing.T) {
-	resetRaceStateChan <- struct{}{}
-	startRace()
+	race := NewRace()
+	startRace(race)
 	// race is started, load the racers
 	req, err := uploadFile("test_prizes.json")
 	if err != nil {
@@ -264,7 +295,7 @@ func TestPrizes(t *testing.T) {
 		t.Fatalf("Unexpected nil request")
 	}
 	w := httptest.NewRecorder()
-	uploadPrizesHandler(w, req)
+	uploadPrizesHandler(w, req, race)
 	if w.Code != 301 {
 		t.Errorf("Expected redirect, got %d", w.Code)
 	}
@@ -277,11 +308,16 @@ func TestPrizes(t *testing.T) {
 		t.Fatalf("Unexpected nil request")
 	}
 	w = httptest.NewRecorder()
-	uploadRacersHandler(w, req)
+	uploadRacersHandler(w, req, race)
 	if w.Code != 301 {
 		t.Errorf("Expected redirect, got %d", w.Code)
 	}
-	entries := <-downloadEntries
+	race.RLock()
+	entries := make([]Entry, len(race.allEntries))
+	for x := range race.allEntries {
+		entries[x] = *race.allEntries[x]
+	}
+	race.RUnlock()
 	for _, entry := range entries {
 		t.Logf("Iterating on entry - %#v", entry)
 		req, err = http.NewRequest("post", "", nil)
@@ -294,18 +330,19 @@ func TestPrizes(t *testing.T) {
 		req.ParseForm()
 		req.Form.Set("bib", strconv.Itoa(int(entry.Bib)))
 		w = httptest.NewRecorder()
-		linkBibHandler(w, req)
+		linkBibHandler(w, req, race)
 		if w.Code != 301 {
 			t.Errorf("Expected redirect, got %s", w.Body)
 		}
 		w = httptest.NewRecorder()
-		linkBibHandler(w, req)
+		linkBibHandler(w, req, race)
 		if w.Code != 301 {
 			t.Errorf("Expected redirect, got %s", w.Body)
 		}
 	}
-	results := <-downloadEntries
-	prizes := <-downloadPrizes
+	race.RLock()
+	results := race.allEntries
+	prizes := race.prizes
 	for x := range results {
 		t.Logf("Place #%d - %#v", x+1, results[x])
 	}
@@ -352,6 +389,7 @@ func TestPrizes(t *testing.T) {
 	EqualInt(t, len(prizes[21].Winners), 0) // women's 51-55
 	EqualInt(t, len(prizes[23].Winners), 0) // women's 56-60
 	EqualInt(t, len(prizes[25].Winners), 0) // women's 61+
+	race.RUnlock()
 }
 
 func EqualInt(t *testing.T, got, expected int) {

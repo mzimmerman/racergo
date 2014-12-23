@@ -64,48 +64,20 @@ func TestLoadDuplicates(t *testing.T) {
 	race := NewRace()
 	startRace(race)
 	// race is started, load the racers
-	req, err := uploadFile("test_dupes.csv")
-	if err != nil {
-		t.Errorf("Unexpected error - %v", err)
-	}
-	if req == nil {
-		t.Fatalf("Unexpected nil request")
-	}
-	w := httptest.NewRecorder()
-	uploadRacersHandler(w, req, race)
-	if w.Code != 409 {
-		t.Errorf("Expected error 409, got %d, %s", w.Code, w.Body.String())
+	if !testUploadRacersHelper(t, "test_dupes.csv", 409, race) {
+		t.Error()
 	}
 
 	race = NewRace()
 	startRace(race)
 	// race is started, load the racers
-	req, err = uploadFile("test_one_entry.csv")
-	if err != nil {
-		t.Errorf("Unexpected error - %v", err)
-	}
-	if req == nil {
-		t.Fatalf("Unexpected nil request")
-	}
-	w = httptest.NewRecorder()
-	uploadRacersHandler(w, req, race)
-	if w.Code != 301 {
-		t.Errorf("Expected redirect, got %d, %s", w.Code, w.Body.String())
+	if !testUploadRacersHelper(t, "test_one_entry.csv", 301, race) {
+		t.Error()
 	}
 
 	// upload the same bib to get duplicates
-	// race is started, load the racers
-	req, err = uploadFile("test_one_entry.csv")
-	if err != nil {
-		t.Errorf("Unexpected error - %v", err)
-	}
-	if req == nil {
-		t.Fatalf("Unexpected nil request")
-	}
-	w = httptest.NewRecorder()
-	uploadRacersHandler(w, req, race)
-	if w.Code != 409 {
-		t.Errorf("Expected error 409, got %d, %s", w.Code, w.Body.String())
+	if !testUploadRacersHelper(t, "test_one_entry.csv", 409, race) {
+		t.Error()
 	}
 }
 
@@ -113,43 +85,14 @@ func TestLoadDuplicateOptionals(t *testing.T) {
 	race := NewRace()
 	startRace(race)
 	// race is started, load the racers
-	req, err := uploadFile("test_one_entry.csv")
-	if err != nil {
-		t.Errorf("Unexpected error - %v", err)
+	if !testUploadRacersHelper(t, "test_one_entry.csv", 301, race) {
+		t.Error()
 	}
-	if req == nil {
-		t.Fatalf("Unexpected nil request")
+	if !testUploadRacersHelper(t, "test_two_entry.csv", 301, race) {
+		t.Error()
 	}
-	w := httptest.NewRecorder()
-	uploadRacersHandler(w, req, race)
-	if w.Code != 301 {
-		t.Errorf("Expected redirect, got %d, %s", w.Code, w.Body.String())
-	}
-	// race is started, load the racers
-	req, err = uploadFile("test_two_entry.csv")
-	if err != nil {
-		t.Errorf("Unexpected error - %v", err)
-	}
-	if req == nil {
-		t.Fatalf("Unexpected nil request")
-	}
-	w = httptest.NewRecorder()
-	uploadRacersHandler(w, req, race)
-	if w.Code != 301 {
-		t.Errorf("Expected redirect, got %d, %s", w.Code, w.Body.String())
-	}
-	// race is started, load the racers
-	req, err = uploadFile("test_three_entry.csv")
-	if err != nil {
-		t.Errorf("Unexpected error - %v", err)
-	}
-	if req == nil {
-		t.Fatalf("Unexpected nil request")
-	}
-	w = httptest.NewRecorder()
-	uploadRacersHandler(w, req, race)
-	if w.Code != 409 {
-		t.Errorf("Expected 409, got %d, %s", w.Code, w.Body.String())
+	if !testUploadRacersHelper(t, "test_three_entry.csv", 409, race) {
+		t.Error()
 	}
 }
 
@@ -284,17 +227,8 @@ func TestLink(t *testing.T) { // includes removing of racers
 	race := NewRace()
 	startRace(race)
 	// race is started, load the racers
-	req, err := uploadFile("test_runners.csv")
-	if err != nil {
-		t.Errorf("Unexpected error - %v", err)
-	}
-	if req == nil {
-		t.Fatalf("Unexpected nil request")
-	}
-	w := httptest.NewRecorder()
-	uploadRacersHandler(w, req, race)
-	if w.Code != 301 {
-		t.Errorf("Expected redirect, got %d", w.Code)
+	if !testUploadRacersHelper(t, "test_runners.csv", 301, race) {
+		t.Error()
 	}
 	// test the beginning, middle, and end
 	tableTests := []struct {
@@ -373,17 +307,8 @@ func TestPrizes(t *testing.T) {
 		t.Errorf("Expected redirect, got %d", w.Code)
 	}
 
-	req, err = uploadFile("test_runners_prizes.csv")
-	if err != nil {
-		t.Errorf("Unexpected error - %v", err)
-	}
-	if req == nil {
-		t.Fatalf("Unexpected nil request")
-	}
-	w = httptest.NewRecorder()
-	uploadRacersHandler(w, req, race)
-	if w.Code != 301 {
-		t.Errorf("Expected redirect, got %d", w.Code)
+	if !testUploadRacersHelper(t, "test_runners_prizes.csv", 301, race) {
+		t.Error()
 	}
 	race.RLock()
 	entries := make([]Entry, len(race.allEntries))

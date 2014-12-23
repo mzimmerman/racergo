@@ -153,78 +153,53 @@ func TestLoadDuplicateOptionals(t *testing.T) {
 	}
 }
 
+// returns true if expected matches and no error
+func testUploadRacersHelper(t *testing.T, filename string, expected int, race *Race) bool {
+	req, err := uploadFile(filename)
+	if err != nil {
+		t.Errorf("Unexpected error - %v", err)
+		return false
+	}
+	if req == nil {
+		t.Fatalf("Unexpected nil request")
+		return false
+	}
+	w := httptest.NewRecorder()
+	uploadRacersHandler(w, req, race)
+	if w.Code != expected {
+		t.Errorf("Expected %d, got %d, %s", expected, w.Code, w.Body.String())
+		return false
+	}
+	return true
+}
+
 func TestLoadRacers(t *testing.T) {
 	race := NewRace()
 	startRace(race)
 	// race is started, load the racers
-	req, err := uploadFile("test_runners.csv")
-	if err != nil {
-		t.Errorf("Unexpected error - %v", err)
+	if !testUploadRacersHelper(t, "test_runners.csv", 301, race) {
+		t.Error()
 	}
-	if req == nil {
-		t.Fatalf("Unexpected nil request")
+	race = NewRace()
+	startRace(race)
+	if !testUploadRacersHelper(t, "test_runners2.csv", 409, race) {
+		t.Error()
 	}
-	w := httptest.NewRecorder()
-	uploadRacersHandler(w, req, race)
-	if w.Code != 301 {
-		t.Errorf("Expected redirect, got %d, %s", w.Code, w.Body.String())
+
+	race = NewRace()
+	if !testUploadRacersHelper(t, "test_runners2.csv", 301, race) {
+		t.Error()
 	}
 
 	race = NewRace()
 	startRace(race)
-	req, err = uploadFile("test_runners2.csv")
-	if err != nil {
-		t.Errorf("Unexpected error - %v", err)
-	}
-	if req == nil {
-		t.Fatalf("Unexpected nil request")
-	}
-	w = httptest.NewRecorder()
-	uploadRacersHandler(w, req, race)
-	if w.Code != 409 {
-		t.Errorf("Expected error for started race and entries without bibs, got %d, %s", w.Code, w.Body.String())
+	if !testUploadRacersHelper(t, "test_runners3.csv", 409, race) {
+		t.Error()
 	}
 
 	race = NewRace()
-	req, err = uploadFile("test_runners2.csv")
-	if err != nil {
-		t.Errorf("Unexpected error - %v", err)
-	}
-	if req == nil {
-		t.Fatalf("Unexpected nil request")
-	}
-	w = httptest.NewRecorder()
-	uploadRacersHandler(w, req, race)
-	if w.Code != 301 {
-		t.Errorf("Expected redirect, got %d, %s", w.Code, w.Body.String())
-	}
-	race = NewRace()
-	startRace(race)
-	req, err = uploadFile("test_runners3.csv")
-	if err != nil {
-		t.Errorf("Unexpected error - %v", err)
-	}
-	if req == nil {
-		t.Fatalf("Unexpected nil request")
-	}
-	w = httptest.NewRecorder()
-	uploadRacersHandler(w, req, race)
-	if w.Code != 409 {
-		t.Errorf("Expected error for started race and entries without bibs, got %d, %s", w.Code, w.Body.String())
-	}
-
-	race = NewRace()
-	req, err = uploadFile("test_runners3.csv")
-	if err != nil {
-		t.Errorf("Unexpected error - %v", err)
-	}
-	if req == nil {
-		t.Fatalf("Unexpected nil request")
-	}
-	w = httptest.NewRecorder()
-	uploadRacersHandler(w, req, race)
-	if w.Code != 301 {
-		t.Errorf("Expected redirect, got %d, %s", w.Code, w.Body.String())
+	if !testUploadRacersHelper(t, "test_runners2.csv", 301, race) {
+		t.Error()
 	}
 
 }

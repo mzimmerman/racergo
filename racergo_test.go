@@ -76,6 +76,81 @@ func TestLoadDuplicates(t *testing.T) {
 	if w.Code != 409 {
 		t.Errorf("Expected error 409, got %d, %s", w.Code, w.Body.String())
 	}
+
+	race = NewRace()
+	startRace(race)
+	// race is started, load the racers
+	req, err = uploadFile("test_one_entry.csv")
+	if err != nil {
+		t.Errorf("Unexpected error - %v", err)
+	}
+	if req == nil {
+		t.Fatalf("Unexpected nil request")
+	}
+	w = httptest.NewRecorder()
+	uploadRacersHandler(w, req, race)
+	if w.Code != 301 {
+		t.Errorf("Expected redirect, got %d, %s", w.Code, w.Body.String())
+	}
+
+	// upload the same bib to get duplicates
+	// race is started, load the racers
+	req, err = uploadFile("test_one_entry.csv")
+	if err != nil {
+		t.Errorf("Unexpected error - %v", err)
+	}
+	if req == nil {
+		t.Fatalf("Unexpected nil request")
+	}
+	w = httptest.NewRecorder()
+	uploadRacersHandler(w, req, race)
+	if w.Code != 409 {
+		t.Errorf("Expected error 409, got %d, %s", w.Code, w.Body.String())
+	}
+}
+
+func TestLoadDuplicateOptionals(t *testing.T) {
+	race := NewRace()
+	startRace(race)
+	// race is started, load the racers
+	req, err := uploadFile("test_one_entry.csv")
+	if err != nil {
+		t.Errorf("Unexpected error - %v", err)
+	}
+	if req == nil {
+		t.Fatalf("Unexpected nil request")
+	}
+	w := httptest.NewRecorder()
+	uploadRacersHandler(w, req, race)
+	if w.Code != 301 {
+		t.Errorf("Expected redirect, got %d, %s", w.Code, w.Body.String())
+	}
+	// race is started, load the racers
+	req, err = uploadFile("test_two_entry.csv")
+	if err != nil {
+		t.Errorf("Unexpected error - %v", err)
+	}
+	if req == nil {
+		t.Fatalf("Unexpected nil request")
+	}
+	w = httptest.NewRecorder()
+	uploadRacersHandler(w, req, race)
+	if w.Code != 301 {
+		t.Errorf("Expected redirect, got %d, %s", w.Code, w.Body.String())
+	}
+	// race is started, load the racers
+	req, err = uploadFile("test_three_entry.csv")
+	if err != nil {
+		t.Errorf("Unexpected error - %v", err)
+	}
+	if req == nil {
+		t.Fatalf("Unexpected nil request")
+	}
+	w = httptest.NewRecorder()
+	uploadRacersHandler(w, req, race)
+	if w.Code != 409 {
+		t.Errorf("Expected 409, got %d, %s", w.Code, w.Body.String())
+	}
 }
 
 func TestLoadRacers(t *testing.T) {

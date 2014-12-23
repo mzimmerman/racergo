@@ -911,15 +911,30 @@ func (race *Race) WriteCSV(writer *csv.Writer) error {
 	return nil
 }
 
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for x := range a {
+		if a[x] != b[x] {
+			return false
+		}
+	}
+	return true
+}
+
 func (race *Race) SetOptionalFields(of []string) error {
 	race.Lock()
 	defer race.Unlock()
-	if race.optionalEntryFields == nil {
+	switch {
+	case len(race.allEntries) == 0:
 		race.optionalEntryFields = of
-		race.modifyNonce = 0
 		return nil
+	case equalStringSlices(of, race.optionalEntryFields):
+		return nil
+	default:
+		return fmt.Errorf("Racers already created!  Cannot change the optional fields now!")
 	}
-	return fmt.Errorf("Optional entry fields are already set!")
 }
 
 func (race *Race) GetOptionalFields() []string {

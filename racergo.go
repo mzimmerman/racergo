@@ -822,10 +822,10 @@ func (race *Race) GenerateTemplate(req templateRequest) error {
 	case "audit":
 		race.modifyNonce = rand.Int()
 		data["Audit"] = race.auditLog
-		data["Fields"] = race.optionalEntryFields
 		data["Nonce"] = race.modifyNonce
 		fallthrough
 	case "admin":
+		data["Fields"] = race.optionalEntryFields
 		data["Admin"] = true
 		fallthrough
 	case "results":

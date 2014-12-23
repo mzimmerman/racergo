@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -203,6 +204,10 @@ func TestTemplates(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Log(w.Body.String())
 			t.Errorf("Error fetching template - %s, expected %d, got %d", u, http.StatusOK, w.Code)
+		}
+		if u == "/admin" && !strings.Contains(w.Body.String(), "Email") {
+			t.Log(w.Body.String())
+			t.Errorf("Expected to see Email optional field in template output but did not get it")
 		}
 	}
 }

@@ -914,12 +914,12 @@ func (race *Race) GetTime() time.Time {
 func (race *Race) WriteCSV(writer *csv.Writer) error {
 	race.Lock()
 	defer race.Unlock()
-	err := writer.Write(append([]string{"Fname", "Lname", "Age", "Gender", "Bib", "Overall Place", "Duration", "Time Finished"}, race.optionalEntryFields...))
+	err := writer.Write(append([]string{"Fname", "Lname", "Age", "Gender", "Bib", "Overall Place", "Duration", "Time Finished", "Confirmed"}, race.optionalEntryFields...))
 	if err != nil {
 		return err
 	}
 	for place, entry := range race.allEntries {
-		err = writer.Write(append([]string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), gender(entry.Male), entry.Bib.String(), strconv.Itoa(place + 1), entry.Duration.String(), entry.TimeFinishedString()}, entry.Optional...))
+		err = writer.Write(append([]string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), gender(entry.Male), entry.Bib.String(), strconv.Itoa(place + 1), entry.Duration.String(), entry.TimeFinishedString(), fmt.Sprintf("%t", entry.Confirmed)}, entry.Optional...))
 		if err != nil {
 			return err
 		}

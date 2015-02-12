@@ -59,11 +59,11 @@ func TestDownloadAndAudit(t *testing.T) {
 	for _, u := range users {
 		addTestEntry(race, t, &u, optionalEntryFields)
 	}
-	validateDownload(t, race, fmt.Sprintf(`Fname,Lname,Age,Gender,Bib,Overall Place,Duration,Time Finished,Email,T-Shirt
-A,B,15,M,1,1,--,--,userA@host.com,Large
-C,D,25,F,2,2,--,--,userC@host.com,Medium
-E,F,30,M,3,3,--,--,userE@host.com,Small
-G,H,35,F,4,4,--,--,userG@host.com,XSmall
+	validateDownload(t, race, fmt.Sprintf(`Fname,Lname,Age,Gender,Bib,Overall Place,Duration,Time Finished,Confirmed,Email,T-Shirt
+A,B,15,M,1,1,--,--,false,userA@host.com,Large
+C,D,25,F,2,2,--,--,false,userC@host.com,Medium
+E,F,30,M,3,3,--,--,false,userE@host.com,Small
+G,H,35,F,4,4,--,--,false,userG@host.com,XSmall
 `))
 	// link bibs, then validate
 	*race.testingTime = raceStart.Add(time.Millisecond)
@@ -79,11 +79,11 @@ G,H,35,F,4,4,--,--,userG@host.com,XSmall
 	linkBibTesting(t, race, 3, false)
 	linkBibTesting(t, race, 3, false)
 
-	validateDownload(t, race, fmt.Sprintf(`Fname,Lname,Age,Gender,Bib,Overall Place,Duration,Time Finished,Email,T-Shirt
-G,H,35,F,4,1,00:00:00.00,%s,userG@host.com,XSmall
-A,B,15,M,1,2,00:00:01.00,%s,userA@host.com,Large
-C,D,25,F,2,3,00:01:00.00,%s,userC@host.com,Medium
-E,F,30,M,3,4,01:00:00.00,%s,userE@host.com,Small
+	validateDownload(t, race, fmt.Sprintf(`Fname,Lname,Age,Gender,Bib,Overall Place,Duration,Time Finished,Confirmed,Email,T-Shirt
+G,H,35,F,4,1,00:00:00.00,%s,true,userG@host.com,XSmall
+A,B,15,M,1,2,00:00:01.00,%s,true,userA@host.com,Large
+C,D,25,F,2,3,00:01:00.00,%s,true,userC@host.com,Medium
+E,F,30,M,3,4,01:00:00.00,%s,true,userE@host.com,Small
 `,
 		raceStart.Add(time.Millisecond).Format(time.ANSIC),
 		raceStart.Add(time.Second).Format(time.ANSIC),

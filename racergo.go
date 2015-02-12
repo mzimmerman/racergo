@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"github.com/darkhelmet/env"
-	"github.com/mzimmerman/sendgrid-go"
+	sendgrid "github.com/mzimmerman/sendgrid-go"
 )
 
 var config struct {
@@ -147,12 +147,20 @@ type Entry struct {
 	Confirmed    bool
 }
 
+// used in html templates
 func (e Entry) Place(p int) int {
 	return p + 1
 }
 
 func (e Entry) HasFinished() bool {
 	return e.Duration > 0
+}
+
+func (e Entry) TimeFinishedString() string {
+	if e.HasFinished() {
+		return e.TimeFinished.Format(time.ANSIC)
+	}
+	return "--"
 }
 
 type Audit struct {
@@ -903,7 +911,7 @@ func (race *Race) WriteCSV(writer *csv.Writer) error {
 		return err
 	}
 	for place, entry := range race.allEntries {
-		err = writer.Write(append([]string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), gender(entry.Male), entry.Bib.String(), strconv.Itoa(place + 1), entry.Duration.String(), entry.TimeFinished.Format(time.ANSIC)}, entry.Optional...))
+		err = writer.Write(append([]string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), gender(entry.Male), entry.Bib.String(), strconv.Itoa(place + 1), entry.Duration.String(), entry.TimeFinishedString()}, entry.Optional...))
 		if err != nil {
 			return err
 		}

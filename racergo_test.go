@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -41,7 +42,10 @@ func addTestEntry(race *Race, t *testing.T, e *Entry, optionalEntryFields []stri
 func TestDownloadAndAudit(t *testing.T) {
 	race := NewRace()
 	startRace(race)
-	optionalEntryFields := []string{"Email", "Large"}
+	optionalEntryFields := []string{"Email", "T-Shirt"}
+	if err := race.SetOptionalFields(optionalEntryFields); err != nil {
+		t.Errorf("Error setting optional entry fields")
+	}
 	raceStart := time.Now().Add(-time.Hour)
 	users := []Entry{
 		Entry{1, "A", "B", true, 15, []string{"userA@host.com", "Large"}, HumanDuration(time.Second), raceStart.Add(time.Second), true},
@@ -55,8 +59,27 @@ func TestDownloadAndAudit(t *testing.T) {
 	r, _ := http.NewRequest("GET", "/download", nil)
 	w := httptest.NewRecorder()
 	downloadHandler(w, r, race)
+	expect := fmt.Sprintf(`Fname,Lname,Age,Gender,Bib,Overall Place,Duration,Time Finished,Email,T-Shirt
+A,B,15,M,1,1,--,--,userA@host.com,Large
+C,D,25,F,2,2,--,--,userC@host.com,Medium
+E,F,30,M,3,3,--,--,userE@host.com,Small
+G,H,35,F,4,4,--,--,userG@host.com,XSmall
+`)
+	if w, g := expect, w.Body.String(); w != g {
+		t.Errorf("Wanted:\n%s\n\nGot:\n%s", w, g)
+	}
 	// TODO: validate downloaded file
 	// TODO: link bibs, validate
+	expect = fmt.Sprintf(`Fname, Lname, Age, Gender, Bib, Overall Place, Duration, Time Finished, Email, T-Shirt
+G, H, 35, F, 4, 1, 00:00:00.00, %s, userG@host.com, XSmall
+A, B, 15, M, 1, 2, 00:00:01.00, %s, userA@host.com, Large
+C, D, 25, F, 2, 3, 00:01:00.00, %s, userC@host.com, Medium
+E, F, 30, M, 3, 4, 01:00:00.00, %s, userE@host.com, Small`,
+		raceStart.Add(time.Millisecond),
+		raceStart.Add(time.Second),
+		raceStart.Add(time.Minute),
+		raceStart.Add(time.Hour),
+	)
 	// TODO: change results through audit post, validate
 }
 

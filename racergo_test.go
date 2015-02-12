@@ -41,12 +41,15 @@ func addTestEntry(race *Race, t *testing.T, e *Entry, optionalEntryFields []stri
 
 func TestDownloadAndAudit(t *testing.T) {
 	race := NewRace()
+	raceStart := time.Now().Add(-time.Hour)
+	race.testingTime = &time.Time{}
+	*race.testingTime = raceStart
 	startRace(race)
 	optionalEntryFields := []string{"Email", "T-Shirt"}
 	if err := race.SetOptionalFields(optionalEntryFields); err != nil {
 		t.Errorf("Error setting optional entry fields")
 	}
-	raceStart := time.Now().Add(-time.Hour)
+
 	users := []Entry{
 		Entry{1, "A", "B", true, 15, []string{"userA@host.com", "Large"}, HumanDuration(time.Second), raceStart.Add(time.Second), true},
 		Entry{2, "C", "D", false, 25, []string{"userC@host.com", "Medium"}, HumanDuration(time.Minute), raceStart.Add(time.Minute), true},
@@ -56,31 +59,65 @@ func TestDownloadAndAudit(t *testing.T) {
 	for _, u := range users {
 		addTestEntry(race, t, &u, optionalEntryFields)
 	}
-	r, _ := http.NewRequest("GET", "/download", nil)
-	w := httptest.NewRecorder()
-	downloadHandler(w, r, race)
-	expect := fmt.Sprintf(`Fname,Lname,Age,Gender,Bib,Overall Place,Duration,Time Finished,Email,T-Shirt
+	validateDownload(t, race, fmt.Sprintf(`Fname,Lname,Age,Gender,Bib,Overall Place,Duration,Time Finished,Email,T-Shirt
 A,B,15,M,1,1,--,--,userA@host.com,Large
 C,D,25,F,2,2,--,--,userC@host.com,Medium
 E,F,30,M,3,3,--,--,userE@host.com,Small
 G,H,35,F,4,4,--,--,userG@host.com,XSmall
-`)
-	if w, g := expect, w.Body.String(); w != g {
+`))
+	// link bibs, then validate
+	*race.testingTime = raceStart.Add(time.Millisecond)
+	linkBibTesting(t, race, 4, false)
+	linkBibTesting(t, race, 4, false)
+	*race.testingTime = raceStart.Add(time.Second)
+	linkBibTesting(t, race, 1, false)
+	linkBibTesting(t, race, 1, false)
+	*race.testingTime = raceStart.Add(time.Minute)
+	linkBibTesting(t, race, 2, false)
+	linkBibTesting(t, race, 2, false)
+	*race.testingTime = raceStart.Add(time.Hour)
+	linkBibTesting(t, race, 3, false)
+	linkBibTesting(t, race, 3, false)
+
+	validateDownload(t, race, fmt.Sprintf(`Fname,Lname,Age,Gender,Bib,Overall Place,Duration,Time Finished,Email,T-Shirt
+G,H,35,F,4,1,00:00:00.00,%s,userG@host.com,XSmall
+A,B,15,M,1,2,00:00:01.00,%s,userA@host.com,Large
+C,D,25,F,2,3,00:01:00.00,%s,userC@host.com,Medium
+E,F,30,M,3,4,01:00:00.00,%s,userE@host.com,Small
+`,
+		raceStart.Add(time.Millisecond).Format(time.ANSIC),
+		raceStart.Add(time.Second).Format(time.ANSIC),
+		raceStart.Add(time.Minute).Format(time.ANSIC),
+		raceStart.Add(time.Hour).Format(time.ANSIC),
+	))
+
+	// TODO: change results through audit post, validate
+}
+
+func linkBibTesting(t *testing.T, race *Race, bib int, remove bool) {
+	req, err := http.NewRequest("post", "", nil)
+	if err != nil {
+		t.Errorf("Unexpected error - %v", err)
+	}
+	req.ParseForm()
+	req.Form.Set("bib", strconv.Itoa(bib))
+	if remove {
+		req.Form.Set("remove", "true")
+	}
+	w := httptest.NewRecorder()
+	linkBibHandler(w, req, race)
+	if w.Code != http.StatusMovedPermanently {
+		t.Errorf("Expected redirect, got %v - %s", w.Code, w.Body)
+	}
+}
+
+func validateDownload(t *testing.T, race *Race, expected string) {
+	r, _ := http.NewRequest("GET", "/download", nil)
+	w := httptest.NewRecorder()
+	downloadHandler(w, r, race)
+	if w, g := expected, w.Body.String(); w != g {
 		t.Errorf("Wanted:\n%s\n\nGot:\n%s", w, g)
 	}
-	// TODO: validate downloaded file
-	// TODO: link bibs, validate
-	expect = fmt.Sprintf(`Fname, Lname, Age, Gender, Bib, Overall Place, Duration, Time Finished, Email, T-Shirt
-G, H, 35, F, 4, 1, 00:00:00.00, %s, userG@host.com, XSmall
-A, B, 15, M, 1, 2, 00:00:01.00, %s, userA@host.com, Large
-C, D, 25, F, 2, 3, 00:01:00.00, %s, userC@host.com, Medium
-E, F, 30, M, 3, 4, 01:00:00.00, %s, userE@host.com, Small`,
-		raceStart.Add(time.Millisecond),
-		raceStart.Add(time.Second),
-		raceStart.Add(time.Minute),
-		raceStart.Add(time.Hour),
-	)
-	// TODO: change results through audit post, validate
 }
 
 func TestLoadDuplicates(t *testing.T) {
@@ -285,13 +322,13 @@ func TestLink(t *testing.T) { // includes removing of racers
 	for i, x := range tableTests {
 		t.Logf("Iteration %d", i)
 		req, err := http.NewRequest("post", "", nil)
+		if err != nil {
+			t.Errorf("Unexpected error - %v", err)
+		}
 		req.ParseForm()
 		req.Form.Set("bib", strconv.Itoa(int(x.bib)))
 		if x.remove {
 			req.Form.Set("remove", "true")
-		}
-		if err != nil {
-			t.Errorf("Unexpected error - %v", err)
 		}
 		w := httptest.NewRecorder()
 		linkBibHandler(w, req, race)

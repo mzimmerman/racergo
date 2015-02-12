@@ -751,7 +751,7 @@ func (race *Race) RecordTimeForBib(bib Bib) error {
 				go sendEmailResponse(*entry, entry.Duration, race.optionalEmailIndex)
 				return nil
 			}
-			now := time.Now()
+			now := race.GetTime()
 			entry.Duration = HumanDuration(now.Sub(race.started))
 			entry.TimeFinished = now
 			sorted := EntrySort(race.allEntries)
@@ -886,6 +886,7 @@ type Race struct {
 	modifyNonce         int
 	optionalEmailIndex  int
 	sync.RWMutex
+	testingTime *time.Time //used only for testing -- if set, return time events from here, otherwise, pull time from syscall
 }
 
 func NewRace() *Race {
@@ -901,6 +902,13 @@ func NewRace() *Race {
 	}
 	log.Printf("Initialized the race")
 	return race
+}
+
+func (race *Race) GetTime() time.Time {
+	if race.testingTime == nil {
+		return time.Now()
+	}
+	return *race.testingTime
 }
 
 func (race *Race) WriteCSV(writer *csv.Writer) error {
@@ -963,7 +971,7 @@ func (race *Race) SetPrizes(prizes []Prize) {
 func (race *Race) Start() {
 	race.Lock()
 	defer race.Unlock()
-	race.started = time.Now()
+	race.started = race.GetTime()
 	race.startRaceChan <- race.started
 }
 

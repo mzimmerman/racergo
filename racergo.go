@@ -333,7 +333,6 @@ func uploadRacersHandler(w http.ResponseWriter, r *http.Request, race *Race) {
 		showErrorForAdmin(w, r.Referer(), "Either blank file or only supplied the header row")
 		return
 	}
-
 	// make the new in-memory data stores and unlink all previous relationships
 	newBibbedEntries := make(map[Bib]Entry)
 	newAllEntries := make([]Entry, 0, 1024)
@@ -364,6 +363,7 @@ func uploadRacersHandler(w http.ResponseWriter, r *http.Request, race *Race) {
 		showErrorForAdmin(w, r.Referer(), "CSV file missing the following fields - %s", mandatoryFields)
 		return
 	}
+	// If Places exist in the data, make sure they are sequential or abort the load
 	// load the data
 	for row := 1; row < len(rawEntries); row++ {
 		entry := Entry{Bib: -1}

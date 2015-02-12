@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -91,7 +92,43 @@ E,F,30,M,3,4,01:00:00.00,%s,true,userE@host.com,Small
 		raceStart.Add(time.Hour).Format(time.ANSIC),
 	))
 
-	// TODO: change results through audit post, validate
+	// now modify the audit record
+	auditContent := fmt.Sprintf(`Fname,Lname,Age,Gender,Bib,Overall Place,Duration,Time Finished,Confirmed,Email,T-Shirt
+G,H,35,F,4,1,--,--,false,userG@host.com,GT
+A,B,15,M,1,2,00:00:01.00,%s,true,userA@host.com,AT
+C,D,25,F,2,3,--,--,true,userC@host.com,CT
+E,F,30,M,3,4,01:00:00.00,%s,true,userE@host.com,ET
+`,
+		raceStart.Add(time.Second).Format(time.ANSIC),
+		raceStart.Add(time.Hour).Format(time.ANSIC),
+	)
+	if err := ioutil.WriteFile("auditUploadTemp", []byte(auditContent), 0666); err != nil {
+		t.Errorf("Error writing file - %v", err)
+	}
+	testUploadRacersHelper(t, "auditUploadTemp", 301, race)
+
+	validateDownload(t, race, auditContent)
+
+	// link them again
+	*race.testingTime = raceStart.Add(time.Millisecond * 2)
+	linkBibTesting(t, race, 2, false)
+	linkBibTesting(t, race, 2, false)
+	*race.testingTime = raceStart.Add(time.Minute * 2)
+	linkBibTesting(t, race, 4, false)
+	linkBibTesting(t, race, 4, false)
+
+	validateDownload(t, race, fmt.Sprintf(`Fname,Lname,Age,Gender,Bib,Overall Place,Duration,Time Finished,Confirmed,Email,T-Shirt
+C,D,25,F,2,1,00:00:00.00,%s,true,userC@host.com,CT
+A,B,15,M,1,2,00:00:01.00,%s,true,userA@host.com,AT
+G,H,35,F,4,3,00:02:00.00,%s,true,userG@host.com,GT
+E,F,30,M,3,4,01:00:00.00,%s,true,userE@host.com,ET
+`,
+		raceStart.Add(time.Millisecond*2).Format(time.ANSIC),
+		raceStart.Add(time.Second).Format(time.ANSIC),
+		raceStart.Add(time.Minute*2).Format(time.ANSIC),
+		raceStart.Add(time.Hour).Format(time.ANSIC),
+	))
+
 }
 
 func linkBibTesting(t *testing.T, race *Race, bib int, remove bool) {

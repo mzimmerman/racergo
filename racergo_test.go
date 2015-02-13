@@ -40,6 +40,26 @@ func addTestEntry(race *Race, t *testing.T, e *Entry, optionalEntryFields []stri
 	}
 }
 
+func downloadUploadCompareDownload(t *testing.T, race *Race) {
+	want := downloadCurrent(t, race)
+	if err := ioutil.WriteFile("auditUploadTemp", want, 0666); err != nil {
+		t.Errorf("Error writing temp audit upload file - %v", err)
+		return
+	}
+	tempStart := race.started
+	tempTestingTime := race.testingTime
+	tempRace := NewRace()
+	*race = *tempRace
+	race.started = tempStart
+	race.testingTime = tempTestingTime
+	testUploadRacersHelper(t, "auditUploadTemp", http.StatusMovedPermanently, race)
+
+	got := downloadCurrent(t, race)
+	if string(want) != string(got) {
+		t.Errorf("Wanted:\n%s\nGot:\n%s", want, got)
+	}
+}
+
 func TestDownloadAndAudit(t *testing.T) {
 	race := NewRace()
 	raceStart := time.Now().Add(-time.Hour)
@@ -55,45 +75,58 @@ func TestDownloadAndAudit(t *testing.T) {
 		Entry{1, "A", "B", true, 15, []string{"userA@host.com", "Large"}, HumanDuration(time.Second), raceStart.Add(time.Second), true},
 		Entry{2, "C", "D", false, 25, []string{"userC@host.com", "Medium"}, HumanDuration(time.Minute), raceStart.Add(time.Minute), true},
 		Entry{3, "E", "F", true, 30, []string{"userE@host.com", "Small"}, HumanDuration(time.Hour), raceStart.Add(time.Hour), true},
-		Entry{4, "G", "H", false, 35, []string{"userG@host.com", "XSmall"}, HumanDuration(time.Millisecond), raceStart.Add(time.Millisecond), true},
+		Entry{4, "G", "H", false, 35, []string{"userG@host.com", "XSmall"}, HumanDuration(time.Millisecond * 10), raceStart.Add(time.Millisecond * 10), true},
 	}
 	for _, u := range users {
 		addTestEntry(race, t, &u, optionalEntryFields)
 	}
-	validateDownload(t, race, fmt.Sprintf(`Fname,Lname,Age,Gender,Bib,Overall Place,Duration,Time Finished,Confirmed,Email,T-Shirt
+	downloadUploadCompareDownload(t, race)
+	validateDownload(t, race, 1, fmt.Sprintf(`Fname,Lname,Age,Gender,Bib,Overall Place,Duration,Time Finished,Confirmed,Email,T-Shirt
 A,B,15,M,1,1,--,--,false,userA@host.com,Large
 C,D,25,F,2,2,--,--,false,userC@host.com,Medium
 E,F,30,M,3,3,--,--,false,userE@host.com,Small
 G,H,35,F,4,4,--,--,false,userG@host.com,XSmall
 `))
 	// link bibs, then validate
-	*race.testingTime = raceStart.Add(time.Millisecond)
+	*race.testingTime = raceStart.Add(time.Millisecond * 10)
 	linkBibTesting(t, race, 4, false)
+	downloadUploadCompareDownload(t, race)
 	linkBibTesting(t, race, 4, false)
+	downloadUploadCompareDownload(t, race)
 	*race.testingTime = raceStart.Add(time.Second)
 	linkBibTesting(t, race, 1, false)
+	downloadUploadCompareDownload(t, race)
 	linkBibTesting(t, race, 1, false)
+	downloadUploadCompareDownload(t, race)
 	*race.testingTime = raceStart.Add(time.Minute)
 	linkBibTesting(t, race, 2, false)
+	downloadUploadCompareDownload(t, race)
 	linkBibTesting(t, race, 2, false)
+	downloadUploadCompareDownload(t, race)
 	*race.testingTime = raceStart.Add(time.Hour)
 	linkBibTesting(t, race, 3, false)
+	downloadUploadCompareDownload(t, race)
 	linkBibTesting(t, race, 3, false)
+	downloadUploadCompareDownload(t, race)
 
-	validateDownload(t, race, fmt.Sprintf(`Fname,Lname,Age,Gender,Bib,Overall Place,Duration,Time Finished,Confirmed,Email,T-Shirt
-G,H,35,F,4,1,00:00:00.00,%s,true,userG@host.com,XSmall
+	validateDownload(t, race, 2, fmt.Sprintf(`Fname,Lname,Age,Gender,Bib,Overall Place,Duration,Time Finished,Confirmed,Email,T-Shirt
+G,H,35,F,4,1,00:00:00.01,%s,true,userG@host.com,XSmall
 A,B,15,M,1,2,00:00:01.00,%s,true,userA@host.com,Large
 C,D,25,F,2,3,00:01:00.00,%s,true,userC@host.com,Medium
 E,F,30,M,3,4,01:00:00.00,%s,true,userE@host.com,Small
 `,
-		raceStart.Add(time.Millisecond).Format(time.ANSIC),
+		raceStart.Add(time.Millisecond*100).Format(time.ANSIC),
 		raceStart.Add(time.Second).Format(time.ANSIC),
 		raceStart.Add(time.Minute).Format(time.ANSIC),
 		raceStart.Add(time.Hour).Format(time.ANSIC),
 	))
-
-	// now modify the audit record
-	auditContent := fmt.Sprintf(`Fname,Lname,Age,Gender,Bib,Overall Place,Duration,Time Finished,Confirmed,Email,T-Shirt
+	downloadUploadCompareDownload(t, race)
+	// now upload modified results in a new race
+	race = NewRace()
+	race.testingTime = &time.Time{}
+	*race.testingTime = raceStart
+	startRace(race)
+	if err := ioutil.WriteFile("auditUploadTemp", []byte(fmt.Sprintf(`Fname,Lname,Age,Gender,Bib,Overall Place,Duration,Time Finished,Confirmed,Email,T-Shirt
 G,H,35,F,4,1,--,--,false,userG@host.com,GT
 A,B,15,M,1,2,00:00:01.00,%s,true,userA@host.com,AT
 C,D,25,F,2,3,--,--,true,userC@host.com,CT
@@ -101,34 +134,46 @@ E,F,30,M,3,4,01:00:00.00,%s,true,userE@host.com,ET
 `,
 		raceStart.Add(time.Second).Format(time.ANSIC),
 		raceStart.Add(time.Hour).Format(time.ANSIC),
-	)
-	if err := ioutil.WriteFile("auditUploadTemp", []byte(auditContent), 0666); err != nil {
+	)), 0666); err != nil {
 		t.Errorf("Error writing file - %v", err)
 	}
 	testUploadRacersHelper(t, "auditUploadTemp", 301, race)
 
-	validateDownload(t, race, auditContent)
+	validateDownload(t, race, 3, fmt.Sprintf(`Fname,Lname,Age,Gender,Bib,Overall Place,Duration,Time Finished,Confirmed,Email,T-Shirt
+A,B,15,M,1,1,00:00:01.00,%s,true,userA@host.com,AT
+E,F,30,M,3,2,01:00:00.00,%s,true,userE@host.com,ET
+C,D,25,F,2,3,--,--,false,userC@host.com,CT
+G,H,35,F,4,4,--,--,false,userG@host.com,GT
+`,
+		raceStart.Add(time.Second).Format(time.ANSIC),
+		raceStart.Add(time.Hour).Format(time.ANSIC),
+	))
+	downloadUploadCompareDownload(t, race)
 
 	// link them again
-	*race.testingTime = raceStart.Add(time.Millisecond * 2)
+	*race.testingTime = raceStart.Add(time.Millisecond * 10 * 2)
 	linkBibTesting(t, race, 2, false)
+	downloadUploadCompareDownload(t, race)
 	linkBibTesting(t, race, 2, false)
+	downloadUploadCompareDownload(t, race)
 	*race.testingTime = raceStart.Add(time.Minute * 2)
 	linkBibTesting(t, race, 4, false)
+	downloadUploadCompareDownload(t, race)
 	linkBibTesting(t, race, 4, false)
+	downloadUploadCompareDownload(t, race)
 
-	validateDownload(t, race, fmt.Sprintf(`Fname,Lname,Age,Gender,Bib,Overall Place,Duration,Time Finished,Confirmed,Email,T-Shirt
-C,D,25,F,2,1,00:00:00.00,%s,true,userC@host.com,CT
+	validateDownload(t, race, 4, fmt.Sprintf(`Fname,Lname,Age,Gender,Bib,Overall Place,Duration,Time Finished,Confirmed,Email,T-Shirt
+C,D,25,F,2,1,00:00:00.02,%s,true,userC@host.com,CT
 A,B,15,M,1,2,00:00:01.00,%s,true,userA@host.com,AT
 G,H,35,F,4,3,00:02:00.00,%s,true,userG@host.com,GT
 E,F,30,M,3,4,01:00:00.00,%s,true,userE@host.com,ET
 `,
-		raceStart.Add(time.Millisecond*2).Format(time.ANSIC),
+		raceStart.Add(time.Millisecond*100*2).Format(time.ANSIC),
 		raceStart.Add(time.Second).Format(time.ANSIC),
 		raceStart.Add(time.Minute*2).Format(time.ANSIC),
 		raceStart.Add(time.Hour).Format(time.ANSIC),
 	))
-
+	downloadUploadCompareDownload(t, race)
 }
 
 func linkBibTesting(t *testing.T, race *Race, bib int, remove bool) {
@@ -144,16 +189,24 @@ func linkBibTesting(t *testing.T, race *Race, bib int, remove bool) {
 	w := httptest.NewRecorder()
 	linkBibHandler(w, req, race)
 	if w.Code != http.StatusMovedPermanently {
-		t.Errorf("Expected redirect, got %v - %s", w.Code, w.Body)
+		t.Errorf("%d - Expected redirect, got %v - %s", bib, w.Code, w.Body)
 	}
 }
 
-func validateDownload(t *testing.T, race *Race, expected string) {
+func downloadCurrent(t *testing.T, race *Race) []byte {
 	r, _ := http.NewRequest("GET", "/download", nil)
 	w := httptest.NewRecorder()
 	downloadHandler(w, r, race)
-	if w, g := expected, w.Body.String(); w != g {
-		t.Errorf("Wanted:\n%s\n\nGot:\n%s", w, g)
+	if w.Code != http.StatusOK {
+		t.Errorf("Error downloading data, wanted status %d, got %d", http.StatusOK, w.Code)
+	}
+	return w.Body.Bytes()
+}
+
+func validateDownload(t *testing.T, race *Race, testnum int, expected string) {
+	current := downloadCurrent(t, race)
+	if w, g := expected, string(current); w != g {
+		t.Errorf("Testnum: %d\nWanted:\n%s\nGot:\n%s", testnum, w, g)
 	}
 }
 

@@ -344,18 +344,24 @@ func uploadRacersHandler(w http.ResponseWriter, r *http.Request, race *Race) {
 		"Age":    struct{}{},
 		"Gender": struct{}{},
 	}
+	reservedFields := map[string]struct{}{
+		"Fname":         struct{}{},
+		"Lname":         struct{}{},
+		"Age":           struct{}{},
+		"Gender":        struct{}{},
+		"Bib":           struct{}{},
+		"Overall Place": struct{}{},
+		"Duration":      struct{}{},
+		"Time Finished": struct{}{},
+		"Confirmed":     struct{}{},
+	}
 	for col := range rawEntries[0] {
-		switch rawEntries[0][col] {
-		case "Fname":
-			fallthrough
-		case "Lname":
-			fallthrough
-		case "Age":
-			fallthrough
-		case "Gender":
+		if _, ok := mandatoryFields[rawEntries[0][col]]; ok {
 			delete(mandatoryFields, rawEntries[0][col])
-		case "Bib": // Bib is a special case but is not mandatory
-		default:
+			continue
+		}
+		if _, ok := reservedFields[rawEntries[0][col]]; !ok {
+			// optional field since it's not in the reserved list
 			newOptionalEntryFields = append(newOptionalEntryFields, rawEntries[0][col])
 		}
 	}
@@ -363,7 +369,6 @@ func uploadRacersHandler(w http.ResponseWriter, r *http.Request, race *Race) {
 		showErrorForAdmin(w, r.Referer(), "CSV file missing the following fields - %s", mandatoryFields)
 		return
 	}
-	// If Places exist in the data, make sure they are sequential or abort the load
 	// load the data
 	for row := 1; row < len(rawEntries); row++ {
 		entry := Entry{Bib: -1}
@@ -386,6 +391,17 @@ func uploadRacersHandler(w http.ResponseWriter, r *http.Request, race *Race) {
 				} else {
 					entry.Bib = Bib(tmpBib)
 				}
+			case "Overall Place":
+				// ignore since this will be calculated on sort
+			case "Duration":
+				entry.Duration, err = ParseHumanDuration(rawEntries[row][col])
+				if err != nil {
+					showErrorForAdmin(w, r.Referer(), "Error parsing duration %s - %v.  Import failed.", rawEntries[row][col], err)
+				}
+			case "Time Finished":
+			// ignore since Time Finished is based on Duration and race start time
+			case "Confirmed":
+				entry.Confirmed = rawEntries[row][col] == "true"
 			default:
 				entry.Optional = append(entry.Optional, rawEntries[row][col])
 			}
@@ -754,8 +770,7 @@ func (race *Race) RecordTimeForBib(bib Bib) error {
 			now := race.GetTime()
 			entry.Duration = HumanDuration(now.Sub(race.started))
 			entry.TimeFinished = now
-			sorted := EntrySort(race.allEntries)
-			sort.Sort(&sorted)
+			race.lockedSortEntries()
 			log.Printf("Bib #%d linked with duration - %s", bib, entry.Duration)
 			return nil
 		}
@@ -797,6 +812,11 @@ func (race *Race) AddEntry(entry Entry) error {
 	if race.started.IsZero() {
 		entry.Confirmed = false
 		entry.Duration = 0
+	} else {
+		// entry.Confirmed status not modified
+		entry.TimeFinished = race.started.Add(time.Duration(entry.Duration))
+	}
+	if entry.Duration == 0 {
 		entry.Confirmed = false
 	}
 	if entry.Bib >= 0 {
@@ -812,7 +832,13 @@ func (race *Race) AddEntry(entry Entry) error {
 		race.allEntries = append(race.allEntries, &entry)
 	}
 	log.Printf("Added Entry - %#v\n", entry)
+	race.lockedSortEntries()
 	return nil
+}
+
+func (race *Race) lockedSortEntries() {
+	sorted := EntrySort(race.allEntries)
+	sort.Sort(&sorted)
 }
 
 type RecentRacer struct {
@@ -981,7 +1007,7 @@ func (race *Race) ModifyEntry(nonce int, mod Entry) error {
 	if nonce != race.modifyNonce {
 		return fmt.Errorf("Error updating entry - audit record was out of date, try your change again")
 	}
-	// TODO: implement modify
+	// todo: implement modify
 	race.modifyNonce = 0
 	return nil
 }

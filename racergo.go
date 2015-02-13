@@ -430,77 +430,6 @@ func uploadRacersHandler(w http.ResponseWriter, r *http.Request, race *Race) {
 	http.Redirect(w, r, "/admin", 301)
 }
 
-//func auditPostHandler(w http.ResponseWriter, r *http.Request) {
-//	mutex.Lock()
-//	defer mutex.Unlock()
-//	if !auditClean {
-//		showErrorForAdmin(w, r.Referer(), "Data modified since audit record pulled, no updates made.  Try again.")
-//	}
-//	auditClean = false
-//	// wipe the in-memory data stores
-//	newBibbedEntries := make(map[Bib]*Entry)
-//	newAllEntries := make([]*Entry, 0, 1024)
-//	r.ParseForm()
-//	// load the new entries
-//	for row := 0; ; row++ {
-//		rowString := strconv.Itoa(row) + "."
-//		entry := &Entry{Bib: -1}
-//		entry.Optional = make([]string, 0)
-//		entry.Fname = r.FormValue(rowString + "Fname")
-//		entry.Lname = r.FormValue(rowString + "Lname")
-//		tmpAge, _ := strconv.Atoi(r.FormValue(rowString + "Age"))
-//		entry.Age = uint(tmpAge)
-//		entry.Male = (r.FormValue(rowString+"Male") == "M")
-//		tmpBib, err := strconv.Atoi(r.FormValue(rowString + "Bib"))
-//		if err != nil {
-//			entry.Bib = -1
-//		} else {
-//			entry.Bib = Bib(tmpBib)
-//		}
-//		if entry.Fname == "" && entry.Lname == "" && entry.Age == 0 && entry.Bib == -1 {
-//			break // this one has all default/empty values, must be the end of the records found
-//		}
-//		duration, err := ParseHumanDuration(r.FormValue(rowString + "Time"))
-//		if err != nil {
-//			fmt.Printf("Unable to parse duration - %v\n", err)
-//		} else {
-//			entry.Duration = duration
-//			// TODO: entry.TimeFinished = raceStart
-//			entry.Confirmed = true
-//		}
-//		for _, opt := range optionalEntryFields {
-//			entry.Optional = append(entry.Optional, r.FormValue(rowString+opt))
-//		}
-//		if entry.Bib >= 0 {
-//			if _, ok := newBibbedEntries[entry.Bib]; ok {
-//				showErrorForAdmin(w, r.Referer(), fmt.Sprintf("Cannot assign bib #%d to multiple runners.", entry.Bib))
-//				return
-//			}
-//			newBibbedEntries[entry.Bib] = entry
-//		}
-//		newAllEntries = append(newAllEntries, entry)
-//	}
-//	// no issues/errors, load the data
-//	bibbedEntries = newBibbedEntries
-//	allEntries = newAllEntries
-//	// now rebuild results
-//	sort.Sort((*EntrySort)(&allEntries))
-//	results = results[:0]
-//	var place Place
-//	for x, e := range allEntries {
-//		if e.HasFinished() {
-//			place++
-//			e.Place = place
-//			results = append(results, &allEntries[x])
-//		}
-//	}
-//	for _, prize := range prizes {
-//		prize.Winners = make([]*Entry, 0)
-//	}
-//	recomputeAllPrizes()
-//	http.Redirect(w, r, "/audit", 301)
-//}
-
 func startHandler(w http.ResponseWriter, r *http.Request, race *Race) {
 	race.Start()
 	http.Redirect(w, r, "/admin", 301)
@@ -528,56 +457,6 @@ func linkBibHandler(w http.ResponseWriter, r *http.Request, race *Race) {
 		return
 	}
 	http.Redirect(w, r, "/admin", 301)
-	//deltaT := HumanDuration(time.Since(raceStart))
-	//mutex.Lock()
-	//defer mutex.Unlock()
-	//auditClean = false
-	//auditLog = append(auditLog, Audit{Duration: deltaT, Bib: bib, Remove: removeBib})
-	//entry, ok := bibbedEntries[bib]
-	//if !ok {
-	//	showErrorForAdmin(w, r.Referer(), "Bib number %d was not assigned to anyone.", bib)
-	//	return
-	//}
-	//if removeBib {
-	//	if entry.Duration == 0 {
-	//		// entry already removed, act successful
-	//		http.Redirect(w, r, "/admin", 301)
-	//		return
-	//	}
-	//	index := int(entry.Place) - 1
-	//	log.Printf("Bib = %d, index = %d, len(results) = %d", bib, index, len(results))
-	//	entry.Duration = 0
-	//	entry.TimeFinished = time.Time{}
-	//	entry.Confirmed = false
-	//	results = append(results[:index], results[index+1:]...)
-	//	for x := index; x < len(results); x++ {
-	//		allEntries[results[x]].Place--
-	//	}
-	//	http.Redirect(w, r, "/admin", 301)
-	//	return
-	//}
-	//if entry.Duration == 0 {
-	//	if entry.Confirmed {
-	//		showErrorForAdmin(w, r.Referer(), "Bib number %d already confirmed for place #%d", bib, entry.Place)
-	//		return
-	//	}
-	//	entry.Confirmed = true
-	//	http.Redirect(w, r, "/admin", 301)
-	//	if emailIndex == -1 { // no e-mail address was found on data load, just return
-	//		return
-	//	}
-	//	emailAddr := entry.Optional[emailIndex]
-	//	_, err = mail.ParseAddress(emailAddr)
-	//	if err != nil {
-	//		log.Printf("Error parsing e-mail address of %s\n", emailAddr)
-	//		return
-	//	}
-	//}
-	//entry.Duration = deltaT
-	//entry.Place = Place(len(results) + 1)
-	//entry.Confirmed = false
-	//results = append(results, entry.Index)
-	//http.Redirect(w, r, "/admin", 301)
 }
 
 func sendEmailResponse(e Entry, hd HumanDuration, emailIndex int) {
@@ -634,38 +513,6 @@ func recomputeAllPrizes(prizes []Prize, allEntries []*Entry) {
 		calculatePrizes(v, prizes)
 	}
 }
-
-//func assignBibHandler(w http.ResponseWriter, r *http.Request) {
-//	id, err := strconv.Atoi(r.FormValue("id"))
-//	if err != nil {
-//		showErrorForAdmin(w, r.Referer(), r.Referer(), "Error %s getting next", err)
-//		return
-//	}
-//	tmpBib, err := strconv.Atoi(r.FormValue("bib"))
-//	if tmpBib < 0 || err != nil {
-//		showErrorForAdmin(w, r.Referer(), "Could not get a valid bib number from %s", r.FormValue("bib"))
-//		return
-//	}
-//	bib := Bib(tmpBib)
-//	mutex.Lock()
-//	defer mutex.Unlock()
-
-//	if len(allEntries) > id {
-//		entry := allEntries[id]
-//		if _, ok := bibbedEntries[bib]; ok {
-//			showErrorForAdmin(w, r.Referer(), "Bib # %d already assigned to %s %s!", bib, bibbedEntries[bib].Fname, bibbedEntries[bib].Lname)
-//			return
-//		}
-//		entry.Bib = bib
-//		log.Printf("Set bib for %s %s to %d", entry.Fname, entry.Lname, bib)
-//		bibbedEntries[entry.Bib] = entry
-//	} else {
-//		showErrorForAdmin(w, r.Referer(), "Id %d was not assigned to anyone.", id)
-//		return
-//	}
-//	http.Redirect(w, r, "/admin", 301)
-//	return
-//}
 
 func addEntryHandler(w http.ResponseWriter, r *http.Request, race *Race) {
 	r.ParseForm()
@@ -787,10 +634,8 @@ func (race *Race) RemoveTimeForBib(bib Bib) error {
 			if entry.HasFinished() {
 				entry.Duration = 0
 				entry.TimeFinished = time.Time{}
-				sorted := EntrySort(race.allEntries)
-				sort.Sort(&sorted)
+				race.lockedSortEntries()
 				log.Printf("Removed time for racer #%d", bib)
-				race.modifyNonce = 0
 				return nil
 			}
 			return fmt.Errorf("Cannot remove time for bib #%d, time is already removed.", bib)
@@ -800,9 +645,7 @@ func (race *Race) RemoveTimeForBib(bib Bib) error {
 	return fmt.Errorf("Bib %d not found", bib)
 }
 
-func (race *Race) AddEntry(entry Entry) error {
-	race.Lock()
-	defer race.Unlock()
+func (race *Race) normalizeEntry(entry *Entry) error {
 	if entry.Fname == "" {
 		return fmt.Errorf("Entry missing first name!")
 	}
@@ -818,6 +661,16 @@ func (race *Race) AddEntry(entry Entry) error {
 	}
 	if entry.Duration == 0 {
 		entry.Confirmed = false
+	}
+	return nil
+}
+
+func (race *Race) AddEntry(entry Entry) error {
+	race.Lock()
+	defer race.Unlock()
+	err := race.normalizeEntry(&entry)
+	if err != nil {
+		return err
 	}
 	if entry.Bib >= 0 {
 		if _, ok := race.bibbedEntries[entry.Bib]; ok {
@@ -839,6 +692,7 @@ func (race *Race) AddEntry(entry Entry) error {
 func (race *Race) lockedSortEntries() {
 	sorted := EntrySort(race.allEntries)
 	sort.Sort(&sorted)
+	race.modifyNonce = 0
 }
 
 type RecentRacer struct {
@@ -1001,14 +855,32 @@ func (race *Race) Start() {
 	race.startRaceChan <- race.started
 }
 
-func (race *Race) ModifyEntry(nonce int, mod Entry) error {
+func (race *Race) ModifyEntry(nonce int, place Place, mod Entry) error {
 	race.Lock()
 	defer race.Unlock()
 	if nonce != race.modifyNonce {
 		return fmt.Errorf("Error updating entry - audit record was out of date, try your change again")
 	}
-	// todo: implement modify
-	race.modifyNonce = 0
+	err := race.normalizeEntry(&mod)
+	if err != nil {
+		return err
+	}
+	placeIndex := int(place - 1)
+	if placeIndex < 0 || placeIndex >= len(race.allEntries) {
+		return fmt.Errorf("placeIndex of %d is out of bounds", placeIndex)
+	}
+	src := race.allEntries[placeIndex]
+	dest, ok := race.bibbedEntries[mod.Bib]
+	if mod.Bib == NoBib || dest == src {
+		*(race.allEntries[placeIndex]) = mod
+	} else if !ok {
+		// bib not found, must have been changed
+		race.allEntries[placeIndex] = &mod
+		race.bibbedEntries[mod.Bib] = &mod
+	} else {
+		return fmt.Errorf("Bib #%d already assigned to %s %s", mod.Bib, dest.Fname, dest.Lname)
+	}
+	race.lockedSortEntries()
 	return nil
 }
 

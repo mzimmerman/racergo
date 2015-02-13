@@ -115,7 +115,7 @@ A,B,15,M,1,2,00:00:01.00,%s,true,userA@host.com,Large
 C,D,25,F,2,3,00:01:00.00,%s,true,userC@host.com,Medium
 E,F,30,M,3,4,01:00:00.00,%s,true,userE@host.com,Small
 `,
-		raceStart.Add(time.Millisecond*100).Format(time.ANSIC),
+		raceStart.Add(time.Millisecond*10).Format(time.ANSIC),
 		raceStart.Add(time.Second).Format(time.ANSIC),
 		raceStart.Add(time.Minute).Format(time.ANSIC),
 		raceStart.Add(time.Hour).Format(time.ANSIC),
@@ -168,7 +168,7 @@ A,B,15,M,1,2,00:00:01.00,%s,true,userA@host.com,AT
 G,H,35,F,4,3,00:02:00.00,%s,true,userG@host.com,GT
 E,F,30,M,3,4,01:00:00.00,%s,true,userE@host.com,ET
 `,
-		raceStart.Add(time.Millisecond*100*2).Format(time.ANSIC),
+		raceStart.Add(time.Millisecond*10*2).Format(time.ANSIC),
 		raceStart.Add(time.Second).Format(time.ANSIC),
 		raceStart.Add(time.Minute*2).Format(time.ANSIC),
 		raceStart.Add(time.Hour).Format(time.ANSIC),

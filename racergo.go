@@ -2,13 +2,14 @@ package main
 
 import (
 	"bytes"
+	"crypto/md5"
+	"encoding/base64"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
 	"log"
-	"math/rand"
 	"mime/multipart"
 	"net"
 	"net/http"
@@ -152,6 +153,11 @@ func (e Entry) Place(p int) int {
 	return p + 1
 }
 
+func (e Entry) Nonce() string {
+	s := md5.Sum([]byte(fmt.Sprintf("%d%d%t%d%s%s%t%s", e.Age, e.Bib, e.Confirmed, e.Duration, e.Fname, e.Lname, e.Male, e.Optional)))
+	return base64.StdEncoding.EncodeToString(s[:])
+}
+
 func (e Entry) HasFinished() bool {
 	return e.Duration > 0
 }
@@ -212,7 +218,7 @@ func (hd HumanDuration) Clock() string {
 
 func ParseHumanDuration(val string) (HumanDuration, error) {
 	var duration HumanDuration
-	if val == "--" { // zero value case
+	if val == "--" || val == "" { // zero value case
 		return duration, nil
 	}
 	str := strings.Split(val, ":")
@@ -514,32 +520,43 @@ func recomputeAllPrizes(prizes []Prize, allEntries []*Entry) {
 	}
 }
 
-func addEntryHandler(w http.ResponseWriter, r *http.Request, race *Race) {
+func parseEntry(r *http.Request, race *Race) (Entry, error) {
 	r.ParseForm()
 	entry := Entry{}
 	age, err := strconv.Atoi(r.FormValue("Age"))
 	if age < 0 {
-		showErrorForAdmin(w, r.Referer(), "Not a valid age, must be >= 0")
-		return
+		return entry, fmt.Errorf("%s is not a valid age, must be >= 0", r.FormValue("Age"))
 	}
 	if err != nil {
-		showErrorForAdmin(w, r.Referer(), "Error %s getting Age", err)
-		return
+		return entry, fmt.Errorf("Error %v getting Age", err)
 	}
 	entry.Age = uint(age)
 	tmpBib, err := strconv.Atoi(r.FormValue("Bib"))
 	entry.Bib = Bib(tmpBib)
 	if err != nil {
-		showErrorForAdmin(w, r.Referer(), "Error %s getting Bib", err)
-		return
+		return entry, fmt.Errorf("Error %v getting Bib", err)
 	}
 	entry.Fname = r.FormValue("Fname")
 	entry.Lname = r.FormValue("Lname")
 	entry.Male = r.FormValue("Male") == "true"
 	entry.Optional = make([]string, 0)
+	entry.Duration, err = ParseHumanDuration(r.FormValue("Duration"))
+	if err != nil {
+		return entry, fmt.Errorf("Error %v getting duration from %s", err, r.FormValue("Duration"))
+	}
+	entry.Confirmed = r.FormValue("Confirmed") == "true"
 	optionalEntryFields := race.GetOptionalFields()
 	for _, s := range optionalEntryFields {
 		entry.Optional = append(entry.Optional, r.FormValue(s))
+	}
+	return entry, nil
+}
+
+func addEntryHandler(w http.ResponseWriter, r *http.Request, race *Race) {
+	entry, err := parseEntry(r, race)
+	if err != nil {
+		showErrorForAdmin(w, r.Referer(), "%v", err)
+		return
 	}
 	err = race.AddEntry(entry)
 	if err != nil {
@@ -692,7 +709,6 @@ func (race *Race) AddEntry(entry Entry) error {
 func (race *Race) lockedSortEntries() {
 	sorted := EntrySort(race.allEntries)
 	sort.Sort(&sorted)
-	race.modifyNonce = 0
 }
 
 type RecentRacer struct {
@@ -708,9 +724,7 @@ func (race *Race) GenerateTemplate(req templateRequest) error {
 	default:
 		req.name = "default"
 	case "audit":
-		race.modifyNonce = rand.Int()
 		data["Audit"] = race.auditLog
-		data["Nonce"] = race.modifyNonce
 		fallthrough
 	case "admin":
 		data["Fields"] = race.optionalEntryFields
@@ -750,9 +764,29 @@ func (race *Race) GenerateTemplate(req templateRequest) error {
 	}
 	return err
 }
-
-func modifyEntry(entry Entry, index Index, bibbedEntries map[Bib]*Entry, allEntries *[]*Entry) error {
-	return nil
+func modifyEntryHandler(w http.ResponseWriter, r *http.Request, race *Race) {
+	place, err := strconv.Atoi(r.FormValue("Place"))
+	if err != nil {
+		showErrorForAdmin(w, r.Referer(), "Error %s getting place", err)
+		return
+	}
+	nonce := r.FormValue("Nonce")
+	if err != nil {
+		showErrorForAdmin(w, r.Referer(), "Error %s getting nonce", err)
+		return
+	}
+	entry, err := parseEntry(r, race)
+	if err != nil {
+		showErrorForAdmin(w, r.Referer(), "%v", err)
+		return
+	}
+	err = race.ModifyEntry(nonce, Place(place), entry)
+	if err != nil {
+		showErrorForAdmin(w, r.Referer(), "%v", err)
+		return
+	}
+	http.Redirect(w, r, r.Referer(), 301)
+	return
 }
 
 type Race struct {
@@ -763,7 +797,6 @@ type Race struct {
 	allEntries          []*Entry       // a sorted slice of all Entries, bibbed and unbibbed, w/ result or not, sorted by Place (first to last)
 	auditLog            []Audit        // A writeonly location to record the actions/events of the race
 	prizes              []Prize
-	modifyNonce         int
 	optionalEmailIndex  int
 	sync.RWMutex
 	testingTime *time.Time //used only for testing -- if set, return time events from here, otherwise, pull time from syscall
@@ -855,10 +888,10 @@ func (race *Race) Start() {
 	race.startRaceChan <- race.started
 }
 
-func (race *Race) ModifyEntry(nonce int, place Place, mod Entry) error {
+func (race *Race) ModifyEntry(nonce string, place Place, mod Entry) error {
 	race.Lock()
 	defer race.Unlock()
-	if nonce != race.modifyNonce {
+	if nonce != race.allEntries[int(place)-1].Nonce() {
 		return fmt.Errorf("Error updating entry - audit record was out of date, try your change again")
 	}
 	err := race.normalizeEntry(&mod)
@@ -870,6 +903,7 @@ func (race *Race) ModifyEntry(nonce int, place Place, mod Entry) error {
 		return fmt.Errorf("placeIndex of %d is out of bounds", placeIndex)
 	}
 	src := race.allEntries[placeIndex]
+	delete(race.bibbedEntries, src.Bib)
 	dest, ok := race.bibbedEntries[mod.Bib]
 	if mod.Bib == NoBib || dest == src {
 		*(race.allEntries[placeIndex]) = mod
@@ -878,6 +912,7 @@ func (race *Race) ModifyEntry(nonce int, place Place, mod Entry) error {
 		race.allEntries[placeIndex] = &mod
 		race.bibbedEntries[mod.Bib] = &mod
 	} else {
+		race.bibbedEntries[src.Bib] = src
 		return fmt.Errorf("Bib #%d already assigned to %s %s", mod.Bib, dest.Fname, dest.Lname)
 	}
 	race.lockedSortEntries()
@@ -898,12 +933,11 @@ func init() {
 	http.Handle(config.webserverHostname+"/admin", RaceHandler(handler))
 	http.Handle(config.webserverHostname+"/start", RaceHandler(startHandler))
 	http.Handle(config.webserverHostname+"/linkBib", RaceHandler(linkBibHandler))
-	//http.HandleFunc(config.webserverHostname+"/assignBib", assignBibHandler)
 	http.Handle(config.webserverHostname+"/addEntry", RaceHandler(addEntryHandler))
+	http.Handle(config.webserverHostname+"/modifyEntry", RaceHandler(modifyEntryHandler))
 	http.Handle(config.webserverHostname+"/download", RaceHandler(downloadHandler))
 	http.Handle(config.webserverHostname+"/uploadRacers", RaceHandler(uploadRacersHandler))
 	http.Handle(config.webserverHostname+"/uploadPrizes", RaceHandler(uploadPrizesHandler))
-	//http.HandleFunc(config.webserverHostname+"/auditPost", auditPostHandler)
 	http.Handle(config.webserverHostname+"/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static/"))))
 	http.Handle(config.webserverHostname+"/fonts/", http.StripPrefix("/fonts/", http.FileServer(http.Dir("fonts/"))))
 	http.Handle("/", http.RedirectHandler("http://"+config.webserverHostname+"/", 307))

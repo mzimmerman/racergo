@@ -19,6 +19,32 @@ func startRace(race *Race) {
 	startHandler(w, r, race)
 }
 
+func modifyTestEntry(race *Race, t *testing.T, place Place, e *Entry, optionalEntryFields []string) {
+	values := make(url.Values)
+	values.Add("Place", strconv.Itoa(int(place)))
+	race.Lock()
+	values.Add("Nonce", race.allEntries[place-1].Nonce())
+	race.Unlock()
+	values.Add("Bib", strconv.Itoa(int(e.Bib)))
+	values.Add("Age", strconv.Itoa(int(e.Age)))
+	values.Add("Fname", e.Fname)
+	values.Add("Lname", e.Lname)
+	values.Add("Duration", e.Duration.String())
+	values.Add("Male", strconv.FormatBool(e.Male))
+	for x, o := range e.Optional {
+		values.Add(optionalEntryFields[x], o)
+	}
+	r, err := http.NewRequest("GET", "/modifyEntry?"+values.Encode(), nil)
+	if err != nil {
+		t.Fatalf("Error creating request - %v", err)
+	}
+	w := httptest.NewRecorder()
+	modifyEntryHandler(w, r, race)
+	if w.Code != http.StatusMovedPermanently {
+		t.Errorf("Wrong status received on modify entry - %v, got %d, %s", *e, w.Code, w.Body.String())
+	}
+}
+
 func addTestEntry(race *Race, t *testing.T, e *Entry, optionalEntryFields []string) {
 	values := make(url.Values)
 	values.Add("Bib", strconv.Itoa(int(e.Bib)))
@@ -174,6 +200,31 @@ E,F,30,M,3,4,01:00:00.00,%s,true,userE@host.com,ET
 		raceStart.Add(time.Hour).Format(time.ANSIC),
 	))
 	downloadUploadCompareDownload(t, race)
+
+	moddedEntry := &Entry{
+		Age:      10,
+		Bib:      5,
+		Fname:    "I",
+		Lname:    "J",
+		Male:     false,
+		Duration: HumanDuration(time.Millisecond * 10 * 1),
+		Optional: []string{"userI@host.com", "IJ"},
+	}
+	race.Start()
+	race.started = raceStart
+
+	modifyTestEntry(race, t, Place(3), moddedEntry, optionalEntryFields)
+	validateDownload(t, race, 4, fmt.Sprintf(`Fname,Lname,Age,Gender,Bib,Overall Place,Duration,Time Finished,Confirmed,Email,T-Shirt
+I,J,10,F,5,1,00:00:00.01,%s,false,userI@host.com,IJ
+C,D,25,F,2,2,00:00:00.02,%s,true,userC@host.com,CT
+A,B,15,M,1,3,00:00:01.00,%s,true,userA@host.com,AT
+E,F,30,M,3,4,01:00:00.00,%s,true,userE@host.com,ET
+`,
+		raceStart.Add(time.Millisecond*10*1).Format(time.ANSIC),
+		raceStart.Add(time.Millisecond*10*2).Format(time.ANSIC),
+		raceStart.Add(time.Second).Format(time.ANSIC),
+		raceStart.Add(time.Hour).Format(time.ANSIC),
+	))
 }
 
 func linkBibTesting(t *testing.T, race *Race, bib int, remove bool) {

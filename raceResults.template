@@ -190,39 +190,40 @@
 					</tr>
 				{{end}}
 			</table>
-			<form role="form" action="auditPost" method="post">
-				<table class="table table-bordered table-condensed">
-					<tr>
-						<th>Place</th>
-						<th>Time</th>
-						<th>Bib</th>
-						<th>First</th>
-						<th>Last</th>
-						<th>Age</th>
-						<th>Gender</th>
-						{{range .Fields}}
-							<th>{{.}}</th>
-						{{end}}
-					</tr>
-					<tbody>
-					{{range $id , $entry := .Entries}}
-						<tr>
-							<td>{{$entry.Place $id}}</td>
-							<td><input class="form-control" type="text" name="{{$id}}.Time" value="{{$entry.Duration}}"></td>
-							<td><input class="form-control" type="number" name="{{$id}}.Bib" value="{{$entry.Bib}}"></td>
-							<td><input class="form-control" type="text" name="{{$id}}.Fname" value="{{$entry.Fname}}"></td>
-							<td><input class="form-control" type="text" name="{{$id}}.Lname" value="{{$entry.Lname}}"></td>
-							<td><input class="form-control" type="number" name="{{$id}}.Age" value="{{$entry.Age}}"></td>
-							<td><input class="form-control" type="text" name="{{$id}}.Male" value="{{if $entry.Male}}M{{else}}F{{end}}"></td>
-							{{range $idx, $opts := $entry.Optional}}
-								<td><input class="form-control" type="text" name="{{$id}}.{{index $.Fields $idx}}" value="{{index $entry.Optional $idx}}"></td>
-							{{end}}
-						</tr>
+			<table class="table table-bordered table-condensed">
+				<tr>
+					<th>Place</th>
+					<th>Duration</th>
+					<th>Bib</th>
+					<th>First</th>
+					<th>Last</th>
+					<th>Age</th>
+					<th>Gender</th>
+					{{range .Fields}}
+						<th>{{.}}</th>
 					{{end}}
-					</tbody>
-				</table>
-				<button class="btn btn-default" type="submit">Save</button>
-			</form>
+					<th>Action</th>
+				</tr>
+				<tbody>
+				{{range $id , $entry := .Entries}}
+					<tr><form role="form" action="/modifyEntry" method="post">
+						<input type="hidden" name="Place" value="{{$entry.Place $id}}">
+						<input type="hidden" name="Nonce" value="{{$entry.Nonce}}">
+						<td>{{$entry.Place $id}}</td>
+						<td><input class="form-control" type="text" name="Duration" value="{{$entry.Duration}}"></td>
+						<td><input class="form-control" type="number" name="Bib" value="{{$entry.Bib}}"></td>
+						<td><input class="form-control" type="text" name="Fname" value="{{$entry.Fname}}"></td>
+						<td><input class="form-control" type="text" name="Lname" value="{{$entry.Lname}}"></td>
+						<td><input class="form-control" type="number" name="Age" value="{{$entry.Age}}"></td>
+						<td><input class="form-control" type="text" name="Male" value="{{if $entry.Male}}M{{else}}F{{end}}"></td>
+						{{range $idx, $opts := $entry.Optional}}
+							<td><input class="form-control" type="text" name="{{index $.Fields $idx}}" value="{{index $entry.Optional $idx}}"></td>
+						{{end}}
+						<td><button class="btn btn-default" type="submit">Save</button></td>
+					</form></tr>
+				{{end}}
+				</tbody>
+			</table>
 		</div>
 	</body>
 </html>
@@ -364,32 +365,36 @@
 					{{end}}
 				</tr>
 				<tbody>
-					{{range $id , $entries := .Entries}}
+					{{range $id , $entry := .Entries}}
 						<tr>
 							<td>
-								{{if lt $entries.Bib 0}}
-									<form class="inline-form" role="form" action="assignBib" method="post">
-										<input type="hidden" name="id" value="{{$id}}">
-										<div class="form-group">
-											<div class="col-md-6">
-												<input class="form-control " type="number" name="bib" required="required" placeholder="Bib #">
-											</div>
-										</div>
-										<button class="btn btn-default" type="submit">Set</button>
+								{{if lt $entry.Bib 0}}
+									<form role="form" action="/modifyEntry" method="post">
+										<input type="hidden" name="Place" value="{{$entry.Place $id}}">
+										<input type="hidden" name="Nonce" value="{{$entry.Nonce}}">
+										<input type="hidden" name="Duration" value="{{$entry.Duration}}">
+										<input class="form-control" type="number" name="Bib" value="{{$entry.Bib}}">
+										<input type="hidden" name="Fname" value="{{$entry.Fname}}">
+										<input type="hidden" name="Lname" value="{{$entry.Lname}}">
+										<input type="hidden" name="Age" value="{{$entry.Age}}">
+										<input type="hidden" name="Male" value="{{if $entry.Male}}M{{else}}F{{end}}">
+										{{range $idx, $opts := $entry.Optional}}
+											<input class="form-control" type="text" name="{{index $.Fields $idx}}" value="{{index $entry.Optional $idx}}">
+										{{end}}
+										<button class="btn btn-default" type="submit">Save</button>
 									</form>
 								{{else}}
-									{{$entries.Bib}}
+									{{$entry.Bib}}
 								{{end}}
 							</td>
-							<td>{{$entries.Fname}}</td>
-							<td>{{$entries.Lname}}</td>
-							<td>{{$entries.Age}}</td>
-							<td>{{if $entries.Male}}M{{else}}F{{end}}</td>
-							{{range $entries.Optional}}
+							<td>{{$entry.Fname}}</td>
+							<td>{{$entry.Lname}}</td>
+							<td>{{$entry.Age}}</td>
+							<td>{{if $entry.Male}}M{{else}}F{{end}}</td>
+							{{range $entry.Optional}}
 								<td>{{.}}</td>
 							{{end}}
 						</tr>
-
 					{{end}}
 				</tbody>
 			</table>

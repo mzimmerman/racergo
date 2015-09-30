@@ -68,6 +68,7 @@ func (tp *TemplatePool) Put(buf *bytes.Buffer) {
 const SENDGRIDUSER = "API_USER"
 const SENDGRIDPASS = "API_PASS"
 
+var headers = []string{"Fname", "Lname", "Age", "Gender", "Bib", "Overall Place", "Duration", "Time Finished", "Confirmed"}
 var serverHandlers chan struct{}
 var raceResultsTemplate *template.Template
 var errorTemplate *template.Template
@@ -82,7 +83,6 @@ func init() {
 	config.emailField = env.StringDefault("RACERGOEMAILFIELD", "Email")
 	config.emailFrom = env.StringDefault("RACERGOFROMEMAIL", "racergo@nonexistenthost.com")
 	numHandlers := runtime.NumCPU()
-	runtime.GOMAXPROCS(numHandlers)
 	if numHandlers >= 2 {
 		// want to leave one cpu not handling racer http requests so as to handle the processing of racers quickly
 		numHandlers--
@@ -339,6 +339,30 @@ func uploadRacersHandler(w http.ResponseWriter, r *http.Request, race *Race) {
 		showErrorForAdmin(w, r.Referer(), "Either blank file or only supplied the header row")
 		return
 	}
+	// accept a file with only time attached to it in the "Time Finished" field
+	if len(rawEntries) >= 2 {
+		if len(rawEntries[1]) >= 7 {
+			found := true
+			for v := 0; v < 6; v++ {
+				if rawEntries[1][v] != "" {
+					found = false
+					break
+				}
+			}
+			if found {
+				startTime, err := time.ParseInLocation(time.ANSIC, rawEntries[1][7], time.Local)
+				if err == nil {
+					err = race.Start(&startTime)
+					if err != nil {
+						showErrorForAdmin(w, r.Referer(), "Error starting race - %s", err)
+						return
+					}
+					rawEntries = append(rawEntries[:1], rawEntries[2:]...) // delete the time header and pull in the rest of the file
+				}
+			}
+		}
+	}
+
 	// make the new in-memory data stores and unlink all previous relationships
 	newBibbedEntries := make(map[Bib]Entry)
 	newAllEntries := make([]Entry, 0, 1024)
@@ -429,7 +453,7 @@ func uploadRacersHandler(w http.ResponseWriter, r *http.Request, race *Race) {
 	for _, e := range newAllEntries {
 		err = race.AddEntry(e)
 		if err != nil {
-			showErrorForAdmin(w, r.Referer(), "%v - partial import", err)
+			showErrorForAdmin(w, r.Referer(), "%v - partial import on record - %#v", err, e)
 			return
 		}
 	}
@@ -437,7 +461,11 @@ func uploadRacersHandler(w http.ResponseWriter, r *http.Request, race *Race) {
 }
 
 func startHandler(w http.ResponseWriter, r *http.Request, race *Race) {
-	race.Start()
+	err := race.Start(nil)
+	if err != nil {
+		showErrorForAdmin(w, r.Referer(), "Error starting race - %s", err)
+		return
+	}
 	http.Redirect(w, r, "/admin", 301)
 }
 
@@ -827,9 +855,16 @@ func (race *Race) GetTime() time.Time {
 func (race *Race) WriteCSV(writer *csv.Writer) error {
 	race.Lock()
 	defer race.Unlock()
-	err := writer.Write(append([]string{"Fname", "Lname", "Age", "Gender", "Bib", "Overall Place", "Duration", "Time Finished", "Confirmed"}, race.optionalEntryFields...))
+	err := writer.Write(append(headers, race.optionalEntryFields...))
 	if err != nil {
 		return err
+	}
+	if !race.started.IsZero() {
+		timeStarted := []string{"", "", "", "", "", "", "", race.started.Format(time.ANSIC), ""}
+		err = writer.Write(append(timeStarted, race.optionalEntryFields...))
+		if err != nil {
+			return err
+		}
 	}
 	for place, entry := range race.allEntries {
 		err = writer.Write(append([]string{entry.Fname, entry.Lname, strconv.Itoa(int(entry.Age)), gender(entry.Male), entry.Bib.String(), strconv.Itoa(place + 1), entry.Duration.String(), entry.TimeFinishedString(), fmt.Sprintf("%t", entry.Confirmed)}, entry.Optional...))
@@ -881,11 +916,19 @@ func (race *Race) SetPrizes(prizes []Prize) {
 	recomputeAllPrizes(race.prizes, race.allEntries)
 }
 
-func (race *Race) Start() {
+func (race *Race) Start(t *time.Time) error { // optional time
 	race.Lock()
 	defer race.Unlock()
-	race.started = race.GetTime()
+	if !race.started.IsZero() && race.started != *t {
+		return fmt.Errorf("Race is already started at - %s, can't start it at %s", race.started.Format(time.ANSIC), t.Format(time.ANSIC))
+	}
+	if t == nil {
+		race.started = race.GetTime()
+	} else {
+		race.started = *t
+	}
 	race.startRaceChan <- race.started
+	return nil
 }
 
 func (race *Race) ModifyEntry(nonce string, place Place, mod Entry) error {

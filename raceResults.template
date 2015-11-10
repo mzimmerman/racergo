@@ -61,7 +61,7 @@
 {{end}}
 
 {{define "addEntry"}}
-	<div class="row">
+	<div class="row well">
 		<form class="inline-form" role="form" action="addEntry" method="post">
 			<div class="form-group col-lg-4">
 				<input class="form-control " type="text" name="Fname" placeholder="First" {{if .Start}}{{else}}autofocus{{end}}>

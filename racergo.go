@@ -339,7 +339,7 @@ func uploadRacersHandler(w http.ResponseWriter, r *http.Request, race *Race) {
 		showErrorForAdmin(w, r.Referer(), "Either blank file or only supplied the header row")
 		return
 	}
-	// accept a file with only time attached to it in the "Time Finished" field
+	// accept a file with only time attached to a row in the "Time Finished" field
 	if len(rawEntries) >= 2 {
 		if len(rawEntries[1]) >= 7 {
 			found := true
@@ -566,7 +566,7 @@ func parseEntry(r *http.Request, race *Race) (Entry, error) {
 	}
 	entry.Fname = r.FormValue("Fname")
 	entry.Lname = r.FormValue("Lname")
-	entry.Male = r.FormValue("Male") == "true"
+	entry.Male = r.FormValue("Male") == "true" || r.FormValue("Male") == "M"
 	entry.Optional = make([]string, 0)
 	entry.Duration, err = ParseHumanDuration(r.FormValue("Duration"))
 	if err != nil {
@@ -893,6 +893,12 @@ func (race *Race) SetOptionalFields(of []string) error {
 	switch {
 	case len(race.allEntries) == 0:
 		race.optionalEntryFields = of
+		for x, fn := range race.optionalEntryFields {
+			if strings.ToLower(fn) == "email" {
+				race.optionalEmailIndex = x
+				break
+			}
+		}
 		return nil
 	case equalStringSlices(of, race.optionalEntryFields):
 		return nil

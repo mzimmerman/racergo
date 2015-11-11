@@ -651,19 +651,30 @@ func (race *Race) RecordTimeForBib(bib Bib) error {
 	}
 	if entry, ok := race.bibbedEntries[bib]; ok {
 		if !entry.Confirmed {
+			now := race.GetTime()
+			duration := HumanDuration(now.Sub(race.started))
 			if entry.HasFinished() {
 				entry.Confirmed = true
 				log.Printf("Bib #%d confirmed with duration - %s", bib, entry.Duration)
+				race.auditLog = append(race.auditLog, Audit{
+					Duration: duration,
+					Bib:      bib,
+					Remove:   false,
+				})
 				// TODO: Verify that every entry before them is *also* confirmed, otherwise their finishing place could be wrong
 				recomputeAllPrizes(race.prizes, race.allEntries)
 				go sendEmailResponse(*entry, entry.Duration, race.optionalEmailIndex)
 				return nil
 			}
-			now := race.GetTime()
-			entry.Duration = HumanDuration(now.Sub(race.started))
+			entry.Duration = duration
 			entry.TimeFinished = now
 			race.lockedSortEntries()
 			log.Printf("Bib #%d linked with duration - %s", bib, entry.Duration)
+			race.auditLog = append(race.auditLog, Audit{
+				Duration: entry.Duration,
+				Bib:      bib,
+				Remove:   false,
+			})
 			return nil
 		}
 		return fmt.Errorf("Bib #%d already confirmed!", bib)
@@ -681,6 +692,11 @@ func (race *Race) RemoveTimeForBib(bib Bib) error {
 				entry.TimeFinished = time.Time{}
 				race.lockedSortEntries()
 				log.Printf("Removed time for racer #%d", bib)
+				race.auditLog = append(race.auditLog, Audit{
+					Duration: HumanDuration(race.GetTime().Sub(race.started)),
+					Bib:      bib,
+					Remove:   true,
+				})
 				return nil
 			}
 			return fmt.Errorf("Cannot remove time for bib #%d, time is already removed.", bib)
@@ -894,7 +910,7 @@ func (race *Race) SetOptionalFields(of []string) error {
 	case len(race.allEntries) == 0:
 		race.optionalEntryFields = of
 		for x, fn := range race.optionalEntryFields {
-			if strings.ToLower(fn) == "email" {
+			if fn == config.emailField {
 				race.optionalEmailIndex = x
 				break
 			}

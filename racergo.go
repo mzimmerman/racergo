@@ -1023,11 +1023,15 @@ func main() {
 	listener, err := net.Listen("tcp", ":80")
 	if err != nil {
 		log.Printf("Error listening on port 80, trying 8080 instead! - %s\n", err)
-		listener, err = net.Listen("tcp4", ":8080")
+		listener, err = net.Listen("tcp", ":8080")
 		if err != nil {
 			log.Fatalf("Error listening on port 8080! - %s\n", err)
 			return
 		}
+	} else {
+		go func() {
+			log.Fatal(http.ListenAndServeTLS(":443", "racergo.cert", "racergo.key", nil))
+		}()
 	}
 	port := strings.Split(listener.Addr().String(), ":")
 	portNum := port[len(port)-1]

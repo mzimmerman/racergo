@@ -387,6 +387,50 @@ func TestLoadDuplicateOptionals(t *testing.T) {
 	}
 }
 
+func TestRescore(t *testing.T) {
+	race := NewRace()
+	now := time.Now()
+	if err := race.AddEntry(Entry{
+		Fname: "A",
+		Lname: "A",
+		Bib:   1,
+		Age:   15,
+		Male:  true,
+	}); err != nil {
+		t.Errorf("Error adding entry - %v", err)
+	}
+	if err := race.AddEntry(Entry{
+		Fname: "B",
+		Lname: "B",
+		Bib:   2,
+		Age:   15,
+		Male:  true,
+	}); err != nil {
+		t.Errorf("Error adding entry - %v", err)
+	}
+	race.Start(&now)
+	if err := race.RecordTimeForBib(1); err != nil {
+		t.Errorf("Error linking bib - %v", err)
+	}
+	if err := race.RecordTimeForBib(2); err != nil {
+		t.Errorf("Error linking bib - %v", err)
+	}
+	race.Lock()
+	if !(race.allEntries[0].Fname == "A" && race.allEntries[1].Fname == "B") {
+		t.Errorf("Expected A to be in front of B")
+	}
+	entry := *(race.allEntries[0])
+	nonce := entry.Nonce()
+	race.Unlock()
+	entry.TimeFinished = entry.TimeFinished.Add(-time.Second)
+	race.ModifyEntry(nonce, 1, entry)
+	race.Lock()
+	if !(race.allEntries[0].Fname == "B" && race.allEntries[1].Fname == "B") {
+		t.Errorf("Expected B to be in front of A")
+	}
+	race.Unlock()
+}
+
 // returns true if expected matches and no error
 func testUploadRacersHelper(t *testing.T, filename string, expected int, race *Race) bool {
 	req, err := uploadFile(filename)

@@ -422,8 +422,29 @@ func TestRescore(t *testing.T) {
 	entry := *(race.allEntries[0])
 	nonce := entry.Nonce()
 	race.Unlock()
+
+	// change A to 1 second later
 	entry.TimeFinished = entry.TimeFinished.Add(-time.Second)
 	race.ModifyEntry(nonce, 1, entry)
+
+	race.Lock()
+	if !(race.allEntries[0].Fname == "B" && race.allEntries[1].Fname == "B") {
+		t.Errorf("Expected B to be in front of A")
+	}
+	race.Unlock()
+	race = NewRace()
+	tmpFile, err := ioutil.TempFile("/tmp", "testRescore")
+	if err != nil {
+		t.Errorf("Error opening temp file - %v", err)
+	}
+	if _, err := tmpFile.WriteString(fmt.Sprintf("Fname,Lname,Age,Gender,Bib,Overall Place,Duration,Time Finished,Confirmed\n,,,,,,,%s,\nc,d,15,F,5,1,%s,%s,false\na,b,15,F,6,2,%s,%s,false\n", now.Format(time.ANSIC), HumanDuration(time.Second*2), now.Add(time.Second*2).Format(time.ANSIC), HumanDuration(time.Second), now.Add(time.Second).Format(time.ANSIC))); err != nil {
+		t.Errorf("Error writing temp file - %v", err)
+	}
+	fname := tmpFile.Name()
+	if err := tmpFile.Close(); err != nil {
+		t.Errorf("Error closing temp file - %v", err)
+	}
+	testUploadRacersHelper(t, fname, http.StatusMovedPermanently, race)
 	race.Lock()
 	if !(race.allEntries[0].Fname == "B" && race.allEntries[1].Fname == "B") {
 		t.Errorf("Expected B to be in front of A")

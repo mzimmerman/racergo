@@ -227,9 +227,9 @@ E,F,30,M,3,4,01:00:00.00,%s,true,userE@host.com,ET
 	}
 
 	modifyTestEntry(race, t, Place(3), moddedEntry, optionalEntryFields)
-	validateDownload(t, race, 4, fmt.Sprintf(`Fname,Lname,Age,Gender,Bib,Overall Place,Duration,Time Finished,Confirmed,Email,T-Shirt
+	validateDownload(t, race, 5, fmt.Sprintf(`Fname,Lname,Age,Gender,Bib,Overall Place,Duration,Time Finished,Confirmed,Email,T-Shirt
 ,,,,,,,%s,,Email,T-Shirt
-I,J,10,F,5,1,00:00:00.01,%s,false,userI@host.com,IJ
+I,J,10,F,5,1,00:00:00.01,%s,true,userI@host.com,IJ
 C,D,25,F,2,2,00:00:00.02,%s,true,userC@host.com,CT
 A,B,15,M,1,3,00:00:01.00,%s,true,userA@host.com,AT
 E,F,30,M,3,4,01:00:00.00,%s,true,userE@host.com,ET
@@ -471,7 +471,7 @@ func TestRescoreOnChange(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error opening temp file - %v", err)
 	}
-	if _, err := tmpFile.WriteString(fmt.Sprintf("Fname,Lname,Age,Gender,Bib,Overall Place,Duration,Time Finished,Confirmed\n,,,,,,,%s,\na,a,15,M,1,1,%s,%s,false\nb,b,15,M,2,2,%s,%s,false\n", now.Format(time.ANSIC), HumanDuration(time.Second*2), now.Add(time.Second*2).Format(time.ANSIC), HumanDuration(time.Second), now.Add(time.Second).Format(time.ANSIC))); err != nil {
+	if _, err := tmpFile.WriteString(fmt.Sprintf("Fname,Lname,Age,Gender,Bib,Overall Place,Duration,Time Finished,Confirmed\n,,,,,,,%s,\nA,A,15,M,1,1,%s,%s,true\nB,B,15,M,2,2,%s,%s,true\n", now.Format(time.ANSIC), HumanDuration(time.Second*2), now.Add(time.Second*2).Format(time.ANSIC), HumanDuration(time.Second), now.Add(time.Second).Format(time.ANSIC))); err != nil {
 		t.Errorf("Error writing temp file - %v", err)
 	}
 	fname := tmpFile.Name()

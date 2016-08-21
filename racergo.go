@@ -747,6 +747,7 @@ func (race *Race) AddEntry(entry Entry) error {
 	}
 	log.Printf("Added Entry - %#v\n", entry)
 	race.lockedSortEntries()
+	recomputeAllPrizes(race.prizes, race.allEntries)
 	return nil
 }
 
@@ -829,6 +830,7 @@ func modifyEntryHandler(w http.ResponseWriter, r *http.Request, race *Race) {
 		showErrorForAdmin(w, r.Referer(), "%v", err)
 		return
 	}
+	race.RecordTimeForBib(entry.Bib) //confirm all modified entries
 	http.Redirect(w, r, r.Referer(), 301)
 	return
 }
@@ -981,6 +983,7 @@ func (race *Race) ModifyEntry(nonce string, place Place, mod Entry) error {
 		return fmt.Errorf("Bib #%d already assigned to %s %s", mod.Bib, dest.Fname, dest.Lname)
 	}
 	race.lockedSortEntries()
+	recomputeAllPrizes(race.prizes, race.allEntries)
 	return nil
 }
 

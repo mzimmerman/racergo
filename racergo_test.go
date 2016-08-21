@@ -387,8 +387,20 @@ func TestLoadDuplicateOptionals(t *testing.T) {
 	}
 }
 
-func TestRescore(t *testing.T) {
+func TestRescoreOnChange(t *testing.T) {
 	race := NewRace()
+	req, err := uploadFile("test_prizes.json")
+	if err != nil {
+		t.Errorf("Unexpected error - %v", err)
+	}
+	if req == nil {
+		t.Fatalf("Unexpected nil request")
+	}
+	w := httptest.NewRecorder()
+	uploadPrizesHandler(w, req, race)
+	if w.Code != 301 {
+		t.Errorf("Expected redirect, got %d", w.Code)
+	}
 	now := time.Now()
 	if err := race.AddEntry(Entry{
 		Fname: "A",
@@ -412,32 +424,54 @@ func TestRescore(t *testing.T) {
 	if err := race.RecordTimeForBib(1); err != nil {
 		t.Errorf("Error linking bib - %v", err)
 	}
+	if err := race.RecordTimeForBib(1); err != nil {
+		t.Errorf("Error linking bib - %v", err)
+	}
 	if err := race.RecordTimeForBib(2); err != nil {
 		t.Errorf("Error linking bib - %v", err)
 	}
-	race.Lock()
-	if !(race.allEntries[0].Fname == "A" && race.allEntries[1].Fname == "B") {
-		t.Errorf("Expected A to be in front of B")
+	if err := race.RecordTimeForBib(2); err != nil {
+		t.Errorf("Error linking bib - %v", err)
 	}
+	race.RLock()
+
+	if race.prizes[0].Winners[0].Fname != "A" {
+		t.Errorf("Wrong winner, expected A but got %s", race.prizes[0].Winners[0].Fname)
+	}
+
 	entry := *(race.allEntries[0])
 	nonce := entry.Nonce()
-	race.Unlock()
+	race.RUnlock()
 
 	// change A to 1 second later
-	entry.TimeFinished = entry.TimeFinished.Add(-time.Second)
+	entry.Duration = entry.Duration + HumanDuration(time.Second*2)
 	race.ModifyEntry(nonce, 1, entry)
 
 	race.Lock()
-	if !(race.allEntries[0].Fname == "B" && race.allEntries[1].Fname == "B") {
-		t.Errorf("Expected B to be in front of A")
+	if race.prizes[0].Winners[0].Fname != "B" {
+		t.Errorf("Wrong winner, expected B but got %s", race.prizes[0].Winners[0].Fname)
 	}
 	race.Unlock()
+
 	race = NewRace()
+	req, err = uploadFile("test_prizes.json")
+	if err != nil {
+		t.Errorf("Unexpected error - %v", err)
+	}
+	if req == nil {
+		t.Fatalf("Unexpected nil request")
+	}
+	w = httptest.NewRecorder()
+	uploadPrizesHandler(w, req, race)
+	if w.Code != 301 {
+		t.Errorf("Expected redirect, got %d", w.Code)
+	}
+
 	tmpFile, err := ioutil.TempFile("/tmp", "testRescore")
 	if err != nil {
 		t.Errorf("Error opening temp file - %v", err)
 	}
-	if _, err := tmpFile.WriteString(fmt.Sprintf("Fname,Lname,Age,Gender,Bib,Overall Place,Duration,Time Finished,Confirmed\n,,,,,,,%s,\nc,d,15,F,5,1,%s,%s,false\na,b,15,F,6,2,%s,%s,false\n", now.Format(time.ANSIC), HumanDuration(time.Second*2), now.Add(time.Second*2).Format(time.ANSIC), HumanDuration(time.Second), now.Add(time.Second).Format(time.ANSIC))); err != nil {
+	if _, err := tmpFile.WriteString(fmt.Sprintf("Fname,Lname,Age,Gender,Bib,Overall Place,Duration,Time Finished,Confirmed\n,,,,,,,%s,\na,a,15,M,1,1,%s,%s,false\nb,b,15,M,2,2,%s,%s,false\n", now.Format(time.ANSIC), HumanDuration(time.Second*2), now.Add(time.Second*2).Format(time.ANSIC), HumanDuration(time.Second), now.Add(time.Second).Format(time.ANSIC))); err != nil {
 		t.Errorf("Error writing temp file - %v", err)
 	}
 	fname := tmpFile.Name()
@@ -445,9 +479,10 @@ func TestRescore(t *testing.T) {
 		t.Errorf("Error closing temp file - %v", err)
 	}
 	testUploadRacersHelper(t, fname, http.StatusMovedPermanently, race)
+
 	race.Lock()
-	if !(race.allEntries[0].Fname == "B" && race.allEntries[1].Fname == "B") {
-		t.Errorf("Expected B to be in front of A")
+	if race.prizes[0].Winners[0].Fname != "B" {
+		t.Errorf("Wrong winner, expected B but got %s", race.prizes[0].Winners[0].Fname)
 	}
 	race.Unlock()
 }

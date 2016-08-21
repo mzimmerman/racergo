@@ -780,13 +780,13 @@ func (race *Race) GenerateTemplate(req templateRequest) error {
 		recentRacers := make([]RecentRacer, 0, numRecent)
 		for i := len(race.allEntries) - 1; i >= 0; i-- {
 			if race.allEntries[i].HasFinished() {
-				recentRacers = append(recentRacers, RecentRacer{
-					Entry: race.allEntries[i],
-					Place: Place(i + 1),
-				})
-			}
-			if len(recentRacers) == numRecent { // list no more than numRecent most recent
-				break
+				if !race.allEntries[i].Confirmed || len(recentRacers) < numRecent {
+					// add all unconfirmed racers that have finished, but only add confirmed recent racers up to length of numRecent
+					recentRacers = append(recentRacers, RecentRacer{
+						Entry: race.allEntries[i],
+						Place: Place(i + 1),
+					})
+				}
 			}
 		}
 		data["RecentRacers"] = recentRacers
@@ -809,6 +809,7 @@ func (race *Race) GenerateTemplate(req templateRequest) error {
 	}
 	return err
 }
+
 func modifyEntryHandler(w http.ResponseWriter, r *http.Request, race *Race) {
 	place, err := strconv.Atoi(r.FormValue("Place"))
 	if err != nil {

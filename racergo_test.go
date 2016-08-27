@@ -31,7 +31,7 @@ func modifyTestEntry(race *Race, t *testing.T, place Place, e *Entry, optionalEn
 	values.Add("Fname", e.Fname)
 	values.Add("Lname", e.Lname)
 	values.Add("Duration", e.Duration.String())
-	values.Add("Male", strconv.FormatBool(e.Male))
+	values.Add("Male", gender(e.Male))
 	for x, o := range e.Optional {
 		values.Add(optionalEntryFields[x], o)
 	}
@@ -52,7 +52,7 @@ func addTestEntry(race *Race, t *testing.T, e *Entry, optionalEntryFields []stri
 	values.Add("Age", strconv.Itoa(int(e.Age)))
 	values.Add("Fname", e.Fname)
 	values.Add("Lname", e.Lname)
-	values.Add("Male", strconv.FormatBool(e.Male))
+	values.Add("Male", gender(e.Male))
 	for x, o := range e.Optional {
 		values.Add(optionalEntryFields[x], o)
 	}

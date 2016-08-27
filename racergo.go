@@ -37,8 +37,9 @@ var config struct {
 }
 
 type templateRequest struct {
-	name   string
-	writer io.Writer
+	name    string
+	writer  io.Writer
+	request *http.Request
 }
 
 type TemplatePool struct {
@@ -71,6 +72,7 @@ const SENDGRIDPASS = "API_PASS"
 var headers = []string{"Fname", "Lname", "Age", "Gender", "Bib", "Overall Place", "Duration", "Time Finished", "Confirmed"}
 var serverHandlers chan struct{}
 var raceResultsTemplate *template.Template
+var raceResultsFuncMap template.FuncMap
 var errorTemplate *template.Template
 var tmplPool *TemplatePool
 
@@ -92,9 +94,12 @@ func init() {
 		serverHandlers <- struct{}{} // fill the channel with valid goroutines
 	}
 	var err error
-	raceResultsTemplate, err = template.ParseFiles("raceResults.template")
+	raceResultsFuncMap = template.FuncMap{"textequal": func(a, b string) bool {
+		return a == b
+	}}
+	raceResultsTemplate, err = template.New("template").Funcs(raceResultsFuncMap).ParseFiles("raceResults.template")
 	if err != nil {
-		log.Fatalf("Error parsing template! - %s\n", err)
+		log.Fatalf("Error parsing template - %s\n", err)
 		return
 	}
 	errorTemplate, err = template.ParseFiles("error.template")
@@ -566,7 +571,10 @@ func parseEntry(r *http.Request, race *Race) (Entry, error) {
 	}
 	entry.Fname = r.FormValue("Fname")
 	entry.Lname = r.FormValue("Lname")
-	entry.Male = r.FormValue("Male") == "true" || r.FormValue("Male") == "M"
+	entry.Male = r.FormValue("Male") == "M"
+	if !entry.Male && !(r.FormValue("Male") == "F") {
+		return entry, fmt.Errorf("You didn't choose a gender!")
+	}
 	entry.Optional = make([]string, 0)
 	entry.Duration, err = ParseHumanDuration(r.FormValue("Duration"))
 	if err != nil {
@@ -582,13 +590,14 @@ func parseEntry(r *http.Request, race *Race) (Entry, error) {
 
 func addEntryHandler(w http.ResponseWriter, r *http.Request, race *Race) {
 	entry, err := parseEntry(r, race)
+	referTo := fmt.Sprintf("http://%s/admin?%s", config.webserverHostname, r.Form.Encode())
 	if err != nil {
-		showErrorForAdmin(w, r.Referer(), "%v", err)
+		showErrorForAdmin(w, referTo, "%v", err)
 		return
 	}
 	err = race.AddEntry(entry)
 	if err != nil {
-		showErrorForAdmin(w, r.Referer(), "%v", err)
+		showErrorForAdmin(w, referTo, "%v", err)
 		return
 	}
 	http.Redirect(w, r, "/admin", 301)
@@ -601,8 +610,9 @@ func handler(w http.ResponseWriter, r *http.Request, race *Race) {
 		serverHandlers <- struct{}{} // wait for handler to finish, then put it back in the queue so another handler can work
 	}()
 	err := race.GenerateTemplate(templateRequest{
-		name:   strings.Trim(r.URL.Path, "/"),
-		writer: w,
+		name:    strings.Trim(r.URL.Path, "/"),
+		writer:  w,
+		request: r,
 	})
 	if err != nil {
 		w.WriteHeader(500)
@@ -772,6 +782,10 @@ func (race *Race) GenerateTemplate(req templateRequest) error {
 		data["Audit"] = race.auditLog
 		fallthrough
 	case "admin":
+		req.request.ParseForm()
+		for key, val := range req.request.Form {
+			data[key] = val[0]
+		}
 		data["Fields"] = race.optionalEntryFields
 		data["Admin"] = true
 		fallthrough
@@ -801,8 +815,12 @@ func (race *Race) GenerateTemplate(req templateRequest) error {
 	data["Prizes"] = race.prizes
 	buf := tmplPool.Get()
 	defer tmplPool.Put(buf)
-	raceResultsTemplate, _ = template.ParseFiles("raceResults.template")
-	err := raceResultsTemplate.ExecuteTemplate(buf, req.name, data)
+	// comment out below four lines for performance!
+	raceResultsTemplate, err := template.New("template").Funcs(raceResultsFuncMap).ParseFiles("raceResults.template")
+	if err != nil {
+		return err
+	}
+	err = raceResultsTemplate.ExecuteTemplate(buf, req.name, data)
 	if err == nil {
 		// no errors processing the template, copy the generated data
 		io.Copy(req.writer, buf)

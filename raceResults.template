@@ -425,3 +425,25 @@
 	</body>
 </html>
 {{end}}
+
+{{define "dayof"}}
+	{{template "header" .}}
+		<title>Day of Signups</title>
+	</head>
+	<body>
+		<div class="container-fluid">
+		{{if .Start}}
+			<div class="col-md-6">
+				{{template "addEntry" .}}
+			</div>
+			<div class="col-md-6">
+				{{template "clock" .}}
+			</div>
+		{{else}}
+			<div class="col-md-12">
+				{{template "addEntry" .}}
+			</div>
+		{{end}}
+	</body>
+</html>
+{{end}}

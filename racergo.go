@@ -590,7 +590,11 @@ func parseEntry(r *http.Request, race *Race) (Entry, error) {
 
 func addEntryHandler(w http.ResponseWriter, r *http.Request, race *Race) {
 	entry, err := parseEntry(r, race)
-	referTo := fmt.Sprintf("http://%s/admin?%s", config.webserverHostname, r.Form.Encode())
+	page := "dayof"
+	if strings.Contains(r.Referer(), "/admin") {
+		page = "admin"
+	}
+	referTo := fmt.Sprintf("http://%s/%s?%s", config.webserverHostname, page, r.Form.Encode())
 	if err != nil {
 		showErrorForAdmin(w, referTo, "%v", err)
 		return
@@ -600,7 +604,7 @@ func addEntryHandler(w http.ResponseWriter, r *http.Request, race *Race) {
 		showErrorForAdmin(w, referTo, "%v", err)
 		return
 	}
-	http.Redirect(w, r, "/admin", 301)
+	http.Redirect(w, r, fmt.Sprintf("/%s", page), 301)
 	return
 }
 
@@ -804,6 +808,11 @@ func (race *Race) GenerateTemplate(req templateRequest) error {
 			}
 		}
 		data["RecentRacers"] = recentRacers
+	case "dayof":
+		req.request.ParseForm()
+		for key, val := range req.request.Form {
+			data[key] = val[0]
+		}
 	}
 	if !race.started.IsZero() {
 		diff := time.Since(race.started)
@@ -1017,6 +1026,7 @@ var globalRace *Race // only used in/from main(), not from testing
 func init() {
 	globalRace = NewRace()
 	http.Handle(config.webserverHostname+"/", RaceHandler(handler))
+	http.Handle(config.webserverHostname+"/dayof", RaceHandler(handler))
 	http.Handle(config.webserverHostname+"/admin", RaceHandler(handler))
 	http.Handle(config.webserverHostname+"/start", RaceHandler(startHandler))
 	http.Handle(config.webserverHostname+"/linkBib", RaceHandler(linkBibHandler))
@@ -1061,6 +1071,7 @@ func main() {
 	log.Printf("Basic - http://localhost:%s", portNum)
 	log.Printf("Admin - http://localhost:%s/admin", portNum)
 	log.Printf("Audit - http://localhost:%s/audit", portNum)
+	log.Printf("Dayof - http://localhost:%s/dayof", portNum)
 	log.Printf("Large Screen Live Results - http://localhost:%s/results", portNum)
 	err = http.Serve(listener, nil)
 	if err != nil {

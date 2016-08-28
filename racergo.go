@@ -495,7 +495,17 @@ func linkBibHandler(w http.ResponseWriter, r *http.Request, race *Race) {
 		showErrorForAdmin(w, r.Referer(), "%v", err)
 		return
 	}
-	http.Redirect(w, r, "/admin", 301)
+	if r.FormValue("scanned") == "true" {
+		err = race.RecordTimeForBib(bib)
+		if err != nil {
+			showErrorForAdmin(w, r.Referer(), "%v", err)
+			return
+		}
+		// using code 409 so it doesn't cache the response
+		http.Error(w, "Bib found and linked successfully", 409)
+		return
+	}
+	http.Redirect(w, r, r.Referer(), 301)
 }
 
 func sendEmailResponse(e Entry, hd HumanDuration, emailIndex int) {
@@ -779,6 +789,10 @@ func (race *Race) GenerateTemplate(req templateRequest) error {
 	race.Lock()
 	defer race.Unlock()
 	data := map[string]interface{}{"Entries": race.allEntries}
+	req.request.ParseForm()
+	for key, val := range req.request.Form {
+		data[key] = val[0]
+	}
 	switch req.name {
 	default:
 		req.name = "default"
@@ -786,10 +800,6 @@ func (race *Race) GenerateTemplate(req templateRequest) error {
 		data["Audit"] = race.auditLog
 		fallthrough
 	case "admin":
-		req.request.ParseForm()
-		for key, val := range req.request.Form {
-			data[key] = val[0]
-		}
 		data["Fields"] = race.optionalEntryFields
 		data["Admin"] = true
 		fallthrough
@@ -809,10 +819,6 @@ func (race *Race) GenerateTemplate(req templateRequest) error {
 		}
 		data["RecentRacers"] = recentRacers
 	case "dayof":
-		req.request.ParseForm()
-		for key, val := range req.request.Form {
-			data[key] = val[0]
-		}
 	}
 	if !race.started.IsZero() {
 		diff := time.Since(race.started)
@@ -1067,12 +1073,12 @@ func main() {
 	}
 	port := strings.Split(listener.Addr().String(), ":")
 	portNum := port[len(port)-1]
-	log.Printf("Server listening on port %s\n", portNum)
-	log.Printf("Basic - http://localhost:%s", portNum)
-	log.Printf("Admin - http://localhost:%s/admin", portNum)
-	log.Printf("Audit - http://localhost:%s/audit", portNum)
-	log.Printf("Dayof - http://localhost:%s/dayof", portNum)
-	log.Printf("Large Screen Live Results - http://localhost:%s/results", portNum)
+	log.Printf("Basic - http://%s:%s", config.webserverHostname, portNum)
+	log.Printf("Admin - http://%s:%s/admin", config.webserverHostname, portNum)
+	log.Printf("Audit - http://%s:%s/audit", config.webserverHostname, portNum)
+	log.Printf("Dayof - http://%s:%s/dayof", config.webserverHostname, portNum)
+	log.Printf("Mobile Scanner Linker - http://%s:%s/linkBib?bib=%%s&scanned=true", config.webserverHostname, portNum)
+	log.Printf("Large Screen Live Results - http://%s:%s/results", config.webserverHostname, portNum)
 	err = http.Serve(listener, nil)
 	if err != nil {
 		log.Fatalf("Error starting http server! - %s\n", err)

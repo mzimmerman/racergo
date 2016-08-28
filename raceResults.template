@@ -444,6 +444,29 @@
 				{{template "addEntry" .}}
 			</div>
 		{{end}}
+		</div>
+		<div class="container-fluid">
+			<table class="table table-bordered table-condensed table-striped">
+				<tr>
+					<th>Bib #</th>
+					<th>First</th>
+					<th>Last</th>
+					<th>Gender</th>
+					<th>Age</th>
+				</tr>
+				<tbody>
+				{{range $idx, $entry := .Entries}}
+					<tr>
+						<td>{{$entry.Bib}}</td>
+						<td>{{$entry.Fname}}</td>
+						<td>{{$entry.Lname}}</td>
+						<td>{{if $entry.Male}}M{{else}}F{{end}}</td>
+						<td>{{$entry.Age}}</td>
+					</tr>
+				{{end}}
+				</tbody>
+			</table>
+		</div>
 	</body>
 </html>
 {{end}}

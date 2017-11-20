@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Instascan</title>
+    <script type="text/javascript" src="instascan.min.js"></script>
+    <script type="text/javascript" src="jquery-3.1.0.min.js"></script>
+</head>
+<body>
+<video id="preview"></video>
+<div id="found"></div>
+<div id="received"></div>
+<script type="text/javascript">
+    let scanner = new Instascan.Scanner({ mirror: false, video: document.getElementById('preview') });
+    scanner.addListener('scan', function (content) {
+        $("#found").append(content);
+        $("#received").append("Trying "+window.location.origin+"/linkBib?scanner=true&bib="+content);
+        $.get(window.location.origin+"/linkBib?scanner=true&bib="+content, function(data) {
+            $("#received").append(data);
+        });
+    });
+    Instascan.Camera.getCameras().then(function (cameras) {
+        if (cameras.length > 1) {
+            scanner.start(cameras[1]);
+        } else {
+            console.error('No cameras found.');
+        }
+    }).catch(function (e) {
+        console.error(e);
+    });
+</script>
+</body>
+</html>

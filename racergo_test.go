@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"encoding/csv"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"runtime"
 	"sort"
 	"strconv"
@@ -118,24 +121,24 @@ G,H,35,F,4,4,--,--,false,userG@host.com,XSmall
 	))
 	// link bibs, then validate
 	*race.testingTime = raceStart.Add(time.Millisecond * 10)
-	linkBibTesting(t, race, 4, false)
+	linkBibTesting(t, race, 4, false, false)
 	downloadUploadCompareDownload(t, race)
-	linkBibTesting(t, race, 4, false)
+	linkBibTesting(t, race, 4, false, true)
 	downloadUploadCompareDownload(t, race)
 	*race.testingTime = raceStart.Add(time.Second)
-	linkBibTesting(t, race, 1, false)
+	linkBibTesting(t, race, 1, false, false)
 	downloadUploadCompareDownload(t, race)
-	linkBibTesting(t, race, 1, false)
+	linkBibTesting(t, race, 1, false, true)
 	downloadUploadCompareDownload(t, race)
 	*race.testingTime = raceStart.Add(time.Minute)
-	linkBibTesting(t, race, 2, false)
+	linkBibTesting(t, race, 2, false, false)
 	downloadUploadCompareDownload(t, race)
-	linkBibTesting(t, race, 2, false)
+	linkBibTesting(t, race, 2, false, true)
 	downloadUploadCompareDownload(t, race)
 	*race.testingTime = raceStart.Add(time.Hour)
-	linkBibTesting(t, race, 3, false)
+	linkBibTesting(t, race, 3, false, false)
 	downloadUploadCompareDownload(t, race)
-	linkBibTesting(t, race, 3, false)
+	linkBibTesting(t, race, 3, false, true)
 	downloadUploadCompareDownload(t, race)
 
 	validateDownload(t, race, 2, fmt.Sprintf(`Fname,Lname,Age,Gender,Bib,Overall Place,Duration,Time Finished,Confirmed,Email,T-Shirt
@@ -187,14 +190,14 @@ G,H,35,F,4,4,--,--,false,userG@host.com,GT
 
 	// link them again
 	*race.testingTime = raceStart.Add(time.Millisecond * 10 * 2)
-	linkBibTesting(t, race, 2, false)
+	linkBibTesting(t, race, 2, false, false)
 	downloadUploadCompareDownload(t, race)
-	linkBibTesting(t, race, 2, false)
+	linkBibTesting(t, race, 2, false, true)
 	downloadUploadCompareDownload(t, race)
 	*race.testingTime = raceStart.Add(time.Minute * 2)
-	linkBibTesting(t, race, 4, false)
+	linkBibTesting(t, race, 4, false, false)
 	downloadUploadCompareDownload(t, race)
-	linkBibTesting(t, race, 4, false)
+	linkBibTesting(t, race, 4, false, true)
 	downloadUploadCompareDownload(t, race)
 
 	validateDownload(t, race, 4, fmt.Sprintf(`Fname,Lname,Age,Gender,Bib,Overall Place,Duration,Time Finished,Confirmed,Email,T-Shirt
@@ -242,7 +245,7 @@ E,F,30,M,3,4,01:00:00.00,%s,true,userE@host.com,ET
 	))
 }
 
-func linkBibTesting(t *testing.T, race *Race, bib int, remove bool) {
+func linkBibTesting(t *testing.T, race *Race, bib int, remove, confirm bool) {
 	req, err := http.NewRequest("post", "", nil)
 	if err != nil {
 		t.Errorf("Unexpected error - %v", err)
@@ -251,6 +254,9 @@ func linkBibTesting(t *testing.T, race *Race, bib int, remove bool) {
 	req.Form.Set("bib", strconv.Itoa(bib))
 	if remove {
 		req.Form.Set("remove", "true")
+	}
+	if confirm {
+		req.Form.Set("scanned", "true")
 	}
 	w := httptest.NewRecorder()
 	linkBibHandler(w, req, race)
@@ -271,8 +277,31 @@ func downloadCurrent(t *testing.T, race *Race) []byte {
 
 func validateDownload(t *testing.T, race *Race, testnum int, expected string) {
 	current := downloadCurrent(t, race)
-	if w, g := expected, string(current); w != g {
-		t.Errorf("Testnum: %d\nWanted:\n%q\nGot:\n%q", testnum, w, g)
+	expectedLines, err := csv.NewReader(strings.NewReader(expected)).ReadAll()
+	if err != nil {
+		t.Errorf("Error parsing expected - %v", err)
+	}
+	currentLines, err := csv.NewReader(bytes.NewReader(current)).ReadAll()
+	if err != nil {
+		t.Errorf("Error parsing current - %v", err)
+	}
+NextCurrent:
+	for _, cur := range currentLines {
+		for _, exp := range expectedLines {
+			if reflect.DeepEqual(cur, exp) {
+				continue NextCurrent
+			}
+		}
+		t.Errorf("Got current: %s", strings.Join(cur, ","))
+	}
+NextExpected:
+	for _, exp := range expectedLines {
+		for _, cur := range currentLines {
+			if reflect.DeepEqual(cur, exp) {
+				continue NextExpected
+			}
+		}
+		t.Errorf("Got expected: %s", strings.Join(exp, ","))
 	}
 }
 
@@ -305,7 +334,7 @@ func TestRestoreTime(t *testing.T) {
 	})
 	*race.testingTime = race.testingTime.Add(time.Minute)
 	race.RecordTimeForBib(1)
-	race.RecordTimeForBib(1)
+	race.ConfirmTimeForBib(1)
 	want = fmt.Sprintf("%s\n,,,,,,,%s,\nmatt,z,34,M,1,1,00:01:00.00,%s,true\n", strings.Join(headers, ","), now.Add(-time.Minute).Format(time.ANSIC), now.Format(time.ANSIC))
 	got = downloadCurrent(t, race)
 	f, err = ioutil.TempFile("/tmp", "racergorestoretime")
@@ -424,13 +453,13 @@ func TestRescoreOnChange(t *testing.T) {
 	if err := race.RecordTimeForBib(1); err != nil {
 		t.Errorf("Error linking bib - %v", err)
 	}
-	if err := race.RecordTimeForBib(1); err != nil {
+	if err := race.ConfirmTimeForBib(1); err != nil {
 		t.Errorf("Error linking bib - %v", err)
 	}
 	if err := race.RecordTimeForBib(2); err != nil {
 		t.Errorf("Error linking bib - %v", err)
 	}
-	if err := race.RecordTimeForBib(2); err != nil {
+	if err := race.ConfirmTimeForBib(2); err != nil {
 		t.Errorf("Error linking bib - %v", err)
 	}
 	race.RLock()
@@ -629,27 +658,28 @@ func TestLink(t *testing.T) { // includes removing of racers
 		code      int
 		confirmed bool
 		remove    bool
+		scanned   bool
 	}{
-		{1, 0, 409, false, false}, // no bib #0 in test_runners.csv
-		{1, 1, 301, false, false},
-		{1, 1, 301, false, true},
-		{1, 1, 409, false, true},
-		{1, 1, 301, false, false},
-		{2, 2, 301, false, false},
-		{2, 2, 301, false, true},
-		{2, 2, 301, false, false},
-		{3, 3, 301, false, false},
-		{4, 4, 301, false, false},
-		{3, 3, 301, false, true},  // remove bib 3 from place 3
-		{4, 3, 301, false, false}, // re-add 3 which will swap their positions
-		{5, 5, 301, false, false},
-		{6, 6, 301, false, false},
-		{1, 1, 301, true, false},
-		{2, 2, 301, true, false},
-		{4, 3, 301, true, false},
-		{3, 4, 301, true, false},
-		{5, 5, 301, true, false},
-		{6, 6, 301, true, false},
+		{1, 0, 409, false, false, false}, // no bib #0 in test_runners.csv
+		{1, 1, 301, false, false, false},
+		{1, 1, 301, false, true, false},
+		{1, 1, 409, false, true, false},
+		{1, 1, 301, false, false, false},
+		{2, 2, 301, false, false, false},
+		{2, 2, 301, false, true, false},
+		{2, 2, 301, false, false, false},
+		{3, 3, 301, false, false, false},
+		{4, 4, 301, false, false, false},
+		{3, 3, 301, false, true, false},  // remove bib 3 from place 3
+		{4, 3, 301, false, false, false}, // re-add 3 which will swap their positions
+		{5, 5, 301, false, false, false},
+		{6, 6, 301, false, false, false},
+		{1, 1, 301, true, false, true},
+		{2, 2, 301, true, false, true},
+		{4, 3, 301, true, false, true},
+		{3, 4, 301, true, false, true},
+		{5, 5, 301, true, false, true},
+		{6, 6, 301, true, false, true},
 	}
 	for i, x := range tableTests {
 		t.Logf("Iteration %d", i)
@@ -661,6 +691,9 @@ func TestLink(t *testing.T) { // includes removing of racers
 		req.Form.Set("bib", strconv.Itoa(int(x.bib)))
 		if x.remove {
 			req.Form.Set("remove", "true")
+		}
+		if x.scanned {
+			req.Form.Set("scanned", "true")
 		}
 		w := httptest.NewRecorder()
 		linkBibHandler(w, req, race)
@@ -724,6 +757,7 @@ func TestPrizes(t *testing.T) {
 		if w.Code != 301 {
 			t.Errorf("Expected redirect, got %s", w.Body)
 		}
+		req.Form.Set("scanned", "true")
 		w = httptest.NewRecorder()
 		linkBibHandler(w, req, race)
 		if w.Code != 301 {

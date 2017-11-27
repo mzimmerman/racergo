@@ -496,14 +496,11 @@ func linkBibHandler(w http.ResponseWriter, r *http.Request, race *Race) {
 		return
 	}
 	if r.FormValue("scanned") == "true" {
-		err = race.RecordTimeForBib(bib)
+		err = race.ConfirmTimeForBib(bib)
 		if err != nil {
 			showErrorForAdmin(w, r.Referer(), "%v", err)
 			return
 		}
-		// using code 409 so it doesn't cache the response
-		http.Error(w, "Bib found and linked successfully", 409)
-		return
 	}
 	http.Redirect(w, r, r.Referer(), 301)
 }
@@ -673,61 +670,87 @@ func (race *Race) RecordTimeForBib(bib Bib) error {
 	if race.started.IsZero() {
 		return fmt.Errorf("Race has not started yet, cannot link a bib")
 	}
-	if entry, ok := race.bibbedEntries[bib]; ok {
-		if !entry.Confirmed {
-			now := race.GetTime()
-			duration := HumanDuration(now.Sub(race.started))
-			if entry.HasFinished() {
-				entry.Confirmed = true
-				log.Printf("Bib #%d confirmed with duration - %s", bib, entry.Duration)
-				race.auditLog = append(race.auditLog, Audit{
-					Duration: duration,
-					Bib:      bib,
-					Remove:   false,
-				})
-				// TODO: Verify that every entry before them is *also* confirmed, otherwise their finishing place could be wrong
-				recomputeAllPrizes(race.prizes, race.allEntries)
-				go sendEmailResponse(*entry, entry.Duration, race.optionalEmailIndex)
-				return nil
-			}
-			entry.Duration = duration
-			entry.TimeFinished = now
-			race.lockedSortEntries()
-			log.Printf("Bib #%d linked with duration - %s", bib, entry.Duration)
-			race.auditLog = append(race.auditLog, Audit{
-				Duration: entry.Duration,
-				Bib:      bib,
-				Remove:   false,
-			})
-			return nil
+	entry, ok := race.bibbedEntries[bib]
+	if !ok {
+		return fmt.Errorf("Bib %d not found", bib)
+	}
+	now := race.GetTime()
+	duration := HumanDuration(now.Sub(race.started))
+	race.auditLog = append(race.auditLog, Audit{
+		Duration: duration,
+		Bib:      bib,
+		Remove:   false,
+	})
+	if entry.HasFinished() {
+		if entry.Confirmed {
+			return fmt.Errorf("Bib #%d already confirmed!", bib)
 		}
+		return nil
+	}
+	entry.Duration = duration
+	entry.TimeFinished = now
+	race.lockedSortEntries()
+	log.Printf("Bib #%d linked with duration - %s", bib, entry.Duration)
+	return nil
+
+}
+
+func (race *Race) ConfirmTimeForBib(bib Bib) error {
+	race.Lock()
+	defer race.Unlock()
+	if race.started.IsZero() {
+		return fmt.Errorf("Race has not started yet, cannot confirm a bib")
+	}
+	entry, ok := race.bibbedEntries[bib]
+	if !ok {
+		return fmt.Errorf("Bib %d not found", bib)
+	}
+	if entry.Confirmed {
 		return fmt.Errorf("Bib #%d already confirmed!", bib)
 	}
-	return fmt.Errorf("Bib %d not found", bib)
+	now := race.GetTime()
+	duration := HumanDuration(now.Sub(race.started))
+	race.auditLog = append(race.auditLog, Audit{
+		Duration: duration,
+		Bib:      bib,
+		Remove:   false,
+	})
+	if !entry.HasFinished() {
+		entry.Duration = duration
+		entry.TimeFinished = now
+	}
+	entry.Confirmed = true
+	log.Printf("Bib #%d confirmed with duration - %s", bib, entry.Duration)
+	// TODO: Verify that every entry before them is *also* confirmed, otherwise their finishing place could be wrong
+	race.lockedSortEntries()
+	recomputeAllPrizes(race.prizes, race.allEntries)
+	go sendEmailResponse(*entry, entry.Duration, race.optionalEmailIndex)
+	return nil
 }
 
 func (race *Race) RemoveTimeForBib(bib Bib) error {
 	race.Lock()
 	defer race.Unlock()
-	if entry, ok := race.bibbedEntries[bib]; ok {
-		if !entry.Confirmed {
-			if entry.HasFinished() {
-				entry.Duration = 0
-				entry.TimeFinished = time.Time{}
-				race.lockedSortEntries()
-				log.Printf("Removed time for racer #%d", bib)
-				race.auditLog = append(race.auditLog, Audit{
-					Duration: HumanDuration(race.GetTime().Sub(race.started)),
-					Bib:      bib,
-					Remove:   true,
-				})
-				return nil
-			}
-			return fmt.Errorf("Cannot remove time for bib #%d, time is already removed.", bib)
-		}
-		return fmt.Errorf("Bib #%d already confirmed!", bib)
+	entry, ok := race.bibbedEntries[bib]
+	if !ok {
+		return fmt.Errorf("Bib %d not found", bib)
 	}
-	return fmt.Errorf("Bib %d not found", bib)
+	race.auditLog = append(race.auditLog, Audit{
+		Duration: HumanDuration(race.GetTime().Sub(race.started)),
+		Bib:      bib,
+		Remove:   true,
+	})
+	if !entry.Confirmed {
+		if entry.HasFinished() {
+			entry.Duration = 0
+			entry.TimeFinished = time.Time{}
+			race.lockedSortEntries()
+			log.Printf("Removed time for racer #%d", bib)
+			return nil
+		}
+		return fmt.Errorf("Cannot remove time for bib #%d, time is already removed.", bib)
+	}
+	return fmt.Errorf("Bib #%d already confirmed!", bib)
 }
 
 func (race *Race) normalizeEntry(entry *Entry) error {
@@ -864,7 +887,7 @@ func modifyEntryHandler(w http.ResponseWriter, r *http.Request, race *Race) {
 		showErrorForAdmin(w, r.Referer(), "%v", err)
 		return
 	}
-	race.RecordTimeForBib(entry.Bib) //confirm all modified entries
+	race.ConfirmTimeForBib(entry.Bib) //confirm all modified entries
 	http.Redirect(w, r, r.Referer(), 301)
 	return
 }
